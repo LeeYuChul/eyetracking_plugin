@@ -11,7 +11,6 @@ import {
 const FLOW_ANALYZE_PATH = "/api/v1/flow/analyze";
 const PREPARE_TARGET_PATH = "/api/v1/flow/prepare-target";
 const UX_CHAT_PATH = "/api/v1/ux/chat";
-const UX_HEURISTIC_CHAT_PATH = "/api/v1/ux/chat/heuristic";
 
 export class AnalysisApiError extends Error {
   status?: number;
@@ -111,19 +110,7 @@ export async function evaluateUx(
     headers: { "Content-Type": "application/json" },
     body: requestBody
   });
-  try {
-    return (await readJsonResponse(response)) as UxEvaluationResponse;
-  } catch (error) {
-    if (error instanceof AnalysisApiError && error.status && error.status >= 500) {
-      const fallbackResponse = await fetch(buildUrl(apiBaseUrl, UX_HEURISTIC_CHAT_PATH), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: requestBody
-      });
-      return (await readJsonResponse(fallbackResponse)) as UxEvaluationResponse;
-    }
-    throw error;
-  }
+  return (await readJsonResponse(response)) as UxEvaluationResponse;
 }
 
 export function artifactToDataUrl(artifact: VisualArtifact | undefined): string | undefined {
@@ -171,18 +158,37 @@ function buildSelectedImages(bundle: AnalysisBundle, targetResult: TargetResult 
   const artifacts: VisualArtifact[] = [];
   const targetId = targetResult?.target_frame_id || bundle.flow_tree.ordered_frame_ids[0];
   const targetFrame = bundle.frames.find((frame) => frame.client_frame_id === targetId);
+  if (targetFrame?.artifacts.original) {
+    artifacts.push(withFrameContext(targetFrame.artifacts.original, targetFrame));
+  }
   if (targetFrame?.artifacts.heatmap_overlay) {
-    artifacts.push(targetFrame.artifacts.heatmap_overlay);
+    artifacts.push(withFrameContext(targetFrame.artifacts.heatmap_overlay, targetFrame));
   }
   if (targetResult) {
     targetResult.frames.slice(0, 3).forEach((frame) => {
+      const sourceFrame = bundle.frames.find((item) => item.client_frame_id === frame.client_frame_id);
+      if (sourceFrame?.artifacts.original) {
+        artifacts.push(withFrameContext(sourceFrame.artifacts.original, sourceFrame));
+      }
       const fullOverlay = frame.artifacts.full_overlay;
       if (fullOverlay) {
-        artifacts.push(fullOverlay);
+        artifacts.push({
+          ...fullOverlay,
+          frame_id: frame.client_frame_id,
+          frame_name: sourceFrame?.frame_name || frame.client_frame_id
+        } as VisualArtifact);
       }
     });
   }
-  return artifacts.slice(0, 4);
+  return artifacts.slice(0, 6);
+}
+
+function withFrameContext(artifact: VisualArtifact, frame: { client_frame_id: string; frame_name: string }): VisualArtifact {
+  return {
+    ...artifact,
+    frame_id: frame.client_frame_id,
+    frame_name: frame.frame_name
+  } as VisualArtifact;
 }
 
 function copyBytes(bytes: Uint8Array): ArrayBuffer {
