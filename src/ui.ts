@@ -2,6 +2,7 @@ import {
   analyzeFlow,
   artifactToDataUrl,
   evaluateUx,
+  evaluateUxStream,
   friendlyErrorMessage,
   prepareTarget
 } from "./api";
@@ -22,6 +23,7 @@ import {
   SelectionInfo,
   TargetResult,
   UiToMainMessage,
+  UxStreamEvent,
   ViewMode
 } from "./types";
 
@@ -46,6 +48,7 @@ let targetFrameId: string | null = null;
 let viewMode: ViewMode = "original";
 let chatEndpointMode: ChatEndpointMode = "vlm";
 let activePage: "analysis" | "results" = "analysis";
+let liveUxEvents: UxStreamEvent[] = [];
 
 const elements = {
   analysisTab: byId<HTMLButtonElement>("analysisTab"),
@@ -75,6 +78,7 @@ const elements = {
   metricGrid: byId<HTMLDivElement>("metricGrid"),
   bundleMeta: byId<HTMLSpanElement>("bundleMeta"),
   chatHistory: byId<HTMLDivElement>("chatHistory"),
+  chatLive: byId<HTMLDivElement>("chatLive"),
   chatMeta: byId<HTMLSpanElement>("chatMeta"),
   resizeHandle: byId<HTMLButtonElement>("resizeHandle")
 };
@@ -273,14 +277,15 @@ async function askQuestion(): Promise<void> {
       { role: "user" as const, content: entry.question },
       { role: "assistant" as const, content: entry.answer.conclusion }
     ]);
-    const response = await evaluateUx(
-      apiBaseUrl,
-      session.analysis_bundle,
-      targetResult,
-      question,
-      previousMessages,
-      chatEndpointMode
-    );
+    liveUxEvents = [];
+    renderChatLive();
+    const response =
+      chatEndpointMode === "vlm"
+        ? await evaluateUxStream(apiBaseUrl, session.analysis_bundle, targetResult, question, previousMessages, (event) => {
+            liveUxEvents = [...liveUxEvents, event].slice(-12);
+            renderChatLive();
+          })
+        : await evaluateUx(apiBaseUrl, session.analysis_bundle, targetResult, question, previousMessages, chatEndpointMode);
     const chatEntry: ChatEntry = {
       question,
       answer: response.answer,
@@ -294,6 +299,7 @@ async function askQuestion(): Promise<void> {
       last_opened_at: new Date().toISOString()
     };
     elements.questionInput.value = "";
+    liveUxEvents = [];
     postToPlugin({ type: "SAVE_SESSION", payload: { session } });
     renderWorkspace();
   } catch (error) {
@@ -492,6 +498,7 @@ function renderChat(): void {
   elements.chatHistory.innerHTML = "";
   const entries = session?.chat_history || [];
   elements.chatMeta.textContent = `${chatEndpointMode} · ${entries.length}`;
+  renderChatLive();
   entries.forEach((entry) => {
     const item = document.createElement("div");
     item.className = "chat-item";
@@ -520,6 +527,65 @@ function renderChat(): void {
     item.append(question, conclusion, reasons, recs, meta);
     elements.chatHistory.append(item);
   });
+}
+
+function renderChatLive(): void {
+  elements.chatLive.innerHTML = "";
+  elements.chatLive.classList.toggle("is-hidden", liveUxEvents.length === 0);
+  liveUxEvents.forEach((event) => {
+    const item = document.createElement("div");
+    item.className = `live-item live-${event.event}`;
+    const label = document.createElement("div");
+    label.className = "live-label";
+    label.textContent = eventLabel(event);
+    const message = document.createElement("div");
+    message.className = "live-message";
+    message.textContent = eventMessage(event);
+    item.append(label, message);
+
+    const details = eventDetails(event);
+    if (details.length > 0) {
+      const list = document.createElement("ul");
+      list.className = "chat-list live-details";
+      details.forEach((detail) => {
+        const li = document.createElement("li");
+        li.textContent = detail;
+        list.append(li);
+      });
+      item.append(list);
+    }
+    elements.chatLive.append(item);
+  });
+  elements.chatLive.scrollTop = elements.chatLive.scrollHeight;
+}
+
+function eventLabel(event: UxStreamEvent): string {
+  if (event.event === "thinking") {
+    return "Thinking";
+  }
+  if (event.event === "final") {
+    return "Answer";
+  }
+  if (event.event === "error") {
+    return "Error";
+  }
+  return String(event.data.stage || "Progress");
+}
+
+function eventMessage(event: UxStreamEvent): string {
+  if (typeof event.data.message === "string") {
+    return event.data.message;
+  }
+  if (event.event === "final") {
+    return "최종 답변을 정리했습니다.";
+  }
+  return "진행 중입니다.";
+}
+
+function eventDetails(event: UxStreamEvent): string[] {
+  const notes = Array.isArray(event.data.reasoning_notes) ? event.data.reasoning_notes : [];
+  const candidates = Array.isArray(event.data.visible_cta_candidates) ? event.data.visible_cta_candidates : [];
+  return [...candidates.map((item) => `CTA: ${String(item)}`), ...notes.map((item) => String(item))].slice(0, 5);
 }
 
 function resolveArtifact(frame: FrameAnalysisResult, targetResult: TargetResult | null) {

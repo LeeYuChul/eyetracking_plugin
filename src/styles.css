@@ -549,6 +549,53 @@ textarea {
   overflow-y: auto;
 }
 
+.chat-live {
+  display: grid;
+  max-height: 220px;
+  gap: 8px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #111827;
+  padding: 10px;
+}
+
+.live-item {
+  display: grid;
+  gap: 4px;
+  border-left: 2px solid var(--border-strong);
+  padding-left: 8px;
+}
+
+.live-thinking {
+  border-left-color: var(--focus);
+}
+
+.live-final {
+  border-left-color: var(--success);
+}
+
+.live-error {
+  border-left-color: var(--danger);
+}
+
+.live-label {
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.live-message {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.live-details {
+  margin-top: 2px;
+}
+
 .chat-item {
   display: grid;
   gap: 6px;

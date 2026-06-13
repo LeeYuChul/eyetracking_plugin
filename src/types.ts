@@ -196,6 +196,13 @@ export interface UxEvaluationResponse {
   model: string;
 }
 
+export type UxStreamEventType = "progress" | "thinking" | "final" | "error";
+
+export interface UxStreamEvent {
+  event: UxStreamEventType;
+  data: Record<string, unknown>;
+}
+
 export interface ChatEntry {
   question: string;
   answer: UxAnswer;

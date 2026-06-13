@@ -6,12 +6,14 @@ import {
   TargetResult,
   ChatEndpointMode,
   UxEvaluationResponse,
+  UxStreamEvent,
   VisualArtifact
 } from "./types";
 
 const FLOW_ANALYZE_PATH = "/api/v1/flow/analyze";
 const PREPARE_TARGET_PATH = "/api/v1/flow/prepare-target";
 const UX_CHAT_PATH = "/api/v1/ux/chat";
+const UX_CHAT_STREAM_PATH = "/api/v1/ux/chat/stream";
 const UX_HEURISTIC_CHAT_PATH = "/api/v1/ux/chat/heuristic";
 
 export class AnalysisApiError extends Error {
@@ -91,23 +93,7 @@ export async function evaluateUx(
   previousMessages: { role: "user" | "assistant"; content: string }[],
   endpointMode: ChatEndpointMode
 ): Promise<UxEvaluationResponse> {
-  const selectedImages = buildSelectedImages(bundle, targetResult);
-  const requestBody = JSON.stringify({
-    question,
-    target_frame_id: targetResult?.target_frame_id || bundle.flow_tree.ordered_frame_ids[0],
-    flow_tree: bundle.flow_tree,
-    evidence: {
-      frames: bundle.frames.map((frame) => ({
-        client_frame_id: frame.client_frame_id,
-        frame_name: frame.frame_name,
-        parsed: frame.parsed,
-        metrics: frame.metrics
-      })),
-      target_result: targetResult,
-      selected_images: selectedImages
-    },
-    previous_messages: previousMessages
-  });
+  const requestBody = buildUxRequestBody(bundle, targetResult, question, previousMessages);
   const path = endpointMode === "heuristic" ? UX_HEURISTIC_CHAT_PATH : UX_CHAT_PATH;
   const response = await fetch(buildUrl(apiBaseUrl, path), {
     method: "POST",
@@ -115,6 +101,70 @@ export async function evaluateUx(
     body: requestBody
   });
   return (await readJsonResponse(response)) as UxEvaluationResponse;
+}
+
+export async function evaluateUxStream(
+  apiBaseUrl: string,
+  bundle: AnalysisBundle,
+  targetResult: TargetResult | null,
+  question: string,
+  previousMessages: { role: "user" | "assistant"; content: string }[],
+  onEvent: (event: UxStreamEvent) => void
+): Promise<UxEvaluationResponse> {
+  const response = await fetch(buildUrl(apiBaseUrl, UX_CHAT_STREAM_PATH), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+    body: buildUxRequestBody(bundle, targetResult, question, previousMessages)
+  });
+  if (!response.ok || !response.body) {
+    return (await readJsonResponse(response)) as UxEvaluationResponse;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalResponse: UxEvaluationResponse | null = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop() || "";
+    for (const part of parts) {
+      const event = parseSseEvent(part);
+      if (!event) {
+        continue;
+      }
+      onEvent(event);
+      if (event.event === "final") {
+        finalResponse = finalResponseFromEvent(event);
+      }
+      if (event.event === "error") {
+        throw new AnalysisApiError(extractErrorMessage(event.data), 500);
+      }
+    }
+  }
+
+  if (buffer.trim()) {
+    const event = parseSseEvent(buffer);
+    if (event) {
+      onEvent(event);
+      if (event.event === "final") {
+        finalResponse = finalResponseFromEvent(event);
+      }
+      if (event.event === "error") {
+        throw new AnalysisApiError(extractErrorMessage(event.data), 500);
+      }
+    }
+  }
+
+  if (!finalResponse) {
+    throw new AnalysisApiError("SSE 응답에서 최종 답변을 받지 못했습니다.", 500);
+  }
+  return finalResponse;
 }
 
 export function artifactToDataUrl(artifact: VisualArtifact | undefined): string | undefined {
@@ -156,6 +206,31 @@ function frameToMeta(frame: FrameInfo, exportScale: number): Record<string, unkn
     file_key: frame.fileKey,
     order_index: frame.orderIndex
   };
+}
+
+function buildUxRequestBody(
+  bundle: AnalysisBundle,
+  targetResult: TargetResult | null,
+  question: string,
+  previousMessages: { role: "user" | "assistant"; content: string }[]
+): string {
+  const selectedImages = buildSelectedImages(bundle, targetResult);
+  return JSON.stringify({
+    question,
+    target_frame_id: targetResult?.target_frame_id || bundle.flow_tree.ordered_frame_ids[0],
+    flow_tree: bundle.flow_tree,
+    evidence: {
+      frames: bundle.frames.map((frame) => ({
+        client_frame_id: frame.client_frame_id,
+        frame_name: frame.frame_name,
+        parsed: frame.parsed,
+        metrics: frame.metrics
+      })),
+      target_result: targetResult,
+      selected_images: selectedImages
+    },
+    previous_messages: previousMessages
+  });
 }
 
 function buildSelectedImages(bundle: AnalysisBundle, targetResult: TargetResult | null): VisualArtifact[] {
@@ -266,6 +341,44 @@ function safeJsonParse(text: string): unknown {
   } catch {
     return text;
   }
+}
+
+function parseSseEvent(chunk: string): UxStreamEvent | null {
+  const lines = chunk.split(/\r?\n/);
+  let event: UxStreamEvent["event"] = "progress";
+  const dataLines: string[] = [];
+  lines.forEach((line) => {
+    if (line.startsWith("event:")) {
+      const value = line.slice(6).trim();
+      if (value === "progress" || value === "thinking" || value === "final" || value === "error") {
+        event = value;
+      }
+    }
+    if (line.startsWith("data:")) {
+      dataLines.push(line.slice(5).trimStart());
+    }
+  });
+  if (dataLines.length === 0) {
+    return null;
+  }
+  const data = safeJsonParse(dataLines.join("\n"));
+  return {
+    event,
+    data: asRecord(data) || { message: String(data) }
+  };
+}
+
+function finalResponseFromEvent(event: UxStreamEvent): UxEvaluationResponse {
+  const answer = asRecord(event.data.answer);
+  if (!answer) {
+    throw new AnalysisApiError("최종 답변 형식이 올바르지 않습니다.", 500);
+  }
+  return {
+    answer: answer as unknown as UxEvaluationResponse["answer"],
+    provider: String(event.data.provider || "ollama"),
+    model: String(event.data.model || ""),
+    storage_policy: "client_must_store_chat_if_needed"
+  };
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
