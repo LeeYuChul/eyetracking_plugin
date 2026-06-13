@@ -166,6 +166,8 @@ export interface TargetFrameResult {
     estimated_retention: number;
     blur_strength_avg: number;
     temporal_distance: number;
+    depth_blur_strength?: number | null;
+    cumulative_blur_strength?: number | null;
   };
   artifacts: Record<string, VisualArtifact>;
 }

@@ -1,6 +1,7 @@
 import {
   AnalysisBundle,
   ExportedFlowPayload,
+  FrameAnalysisResult,
   FrameInfo,
   PLUGIN_VERSION,
   TargetResult,
@@ -76,9 +77,9 @@ export async function prepareTarget(
         parsed: frame.parsed
       })),
       options: {
-        blur_strength_base: 8,
-        temporal_decay_weight: 1,
-        scanpath_weight: 0.6
+        depth_blur_base: 10,
+        depth_blur_step: 10,
+        scanpath_weight: 0
       }
     })
   });
@@ -93,7 +94,7 @@ export async function evaluateUx(
   previousMessages: { role: "user" | "assistant"; content: string }[],
   endpointMode: ChatEndpointMode
 ): Promise<UxEvaluationResponse> {
-  const requestBody = buildUxRequestBody(bundle, targetResult, question, previousMessages);
+  const requestBody = await buildUxRequestBody(bundle, targetResult, question, previousMessages);
   const path = endpointMode === "heuristic" ? UX_HEURISTIC_CHAT_PATH : UX_CHAT_PATH;
   const response = await fetch(buildUrl(apiBaseUrl, path), {
     method: "POST",
@@ -111,10 +112,11 @@ export async function evaluateUxStream(
   previousMessages: { role: "user" | "assistant"; content: string }[],
   onEvent: (event: UxStreamEvent) => void
 ): Promise<UxEvaluationResponse> {
+  const requestBody = await buildUxRequestBody(bundle, targetResult, question, previousMessages);
   const response = await fetch(buildUrl(apiBaseUrl, UX_CHAT_STREAM_PATH), {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-    body: buildUxRequestBody(bundle, targetResult, question, previousMessages)
+    body: requestBody
   });
   if (!response.ok || !response.body) {
     return (await readJsonResponse(response)) as UxEvaluationResponse;
@@ -208,13 +210,13 @@ function frameToMeta(frame: FrameInfo, exportScale: number): Record<string, unkn
   };
 }
 
-function buildUxRequestBody(
+async function buildUxRequestBody(
   bundle: AnalysisBundle,
   targetResult: TargetResult | null,
   question: string,
   previousMessages: { role: "user" | "assistant"; content: string }[]
-): string {
-  const selectedImages = buildSelectedImages(bundle, targetResult);
+): Promise<string> {
+  const selectedImages = await buildSelectedImages(bundle, targetResult);
   return JSON.stringify({
     question,
     target_frame_id: targetResult?.target_frame_id || bundle.flow_tree.ordered_frame_ids[0],
@@ -233,11 +235,10 @@ function buildUxRequestBody(
   });
 }
 
-function buildSelectedImages(bundle: AnalysisBundle, targetResult: TargetResult | null): VisualArtifact[] {
+async function buildSelectedImages(bundle: AnalysisBundle, targetResult: TargetResult | null): Promise<VisualArtifact[]> {
   const artifacts: VisualArtifact[] = [];
   const targetId = targetResult?.target_frame_id || bundle.flow_tree.ordered_frame_ids[0];
   const targetFrame = bundle.frames.find((frame) => frame.client_frame_id === targetId);
-  const pathIds = targetResult?.path_frame_ids || pathToTarget(bundle, targetId);
   const pushed = new Set<string>();
 
   const pushArtifact = (
@@ -264,45 +265,109 @@ function buildSelectedImages(bundle: AnalysisBundle, targetResult: TargetResult 
   if (targetFrame?.artifacts.original) {
     pushArtifact(targetFrame.artifacts.original, targetFrame, "target_original");
   }
-  if (targetFrame?.artifacts.heatmap_overlay) {
-    pushArtifact(targetFrame.artifacts.heatmap_overlay, targetFrame, "target_heatmap_overlay");
-  }
-  if (targetFrame?.artifacts.scanpath_overlay) {
-    pushArtifact(targetFrame.artifacts.scanpath_overlay, targetFrame, "target_scanpath_overlay");
-  }
-
-  pathIds.forEach((frameId) => {
-    const frame = bundle.frames.find((item) => item.client_frame_id === frameId);
-    if (frame) {
-      pushArtifact(frame.artifacts.original, frame, frameId === targetId ? "target_path_original" : "path_original");
-    }
-  });
 
   if (targetResult) {
-    targetResult.frames.forEach((frame) => {
-      const sourceFrame = bundle.frames.find((item) => item.client_frame_id === frame.client_frame_id);
-      const frameContext = sourceFrame || { client_frame_id: frame.client_frame_id, frame_name: frame.client_frame_id };
-      pushArtifact(frame.artifacts.memory_blur, frameContext, "memory_blur");
-      pushArtifact(frame.artifacts.full_overlay, frameContext, "memory_full_overlay");
-    });
+    const priorFrameIds = targetResult.path_frame_ids.filter((frameId) => frameId !== targetId);
+    const memoryByFrameId = new Map(targetResult.frames.map((frame) => [frame.client_frame_id, frame]));
+    for (let index = 0; index < priorFrameIds.length; index += 1) {
+      const frameId = priorFrameIds[index];
+      const sourceFrame = bundle.frames.find((item) => item.client_frame_id === frameId);
+      const memoryFrame = memoryByFrameId.get(frameId);
+      if (!sourceFrame || !memoryFrame) {
+        continue;
+      }
+      const cumulativeBlurStrength = priorFrameIds
+        .slice(index)
+        .reduce((sum, currentFrameId) => sum + depthBlurStrength(memoryByFrameId.get(currentFrameId), targetResult.path_frame_ids, currentFrameId), 0);
+      try {
+        const clientBlur = await makeClientMemoryBlurArtifact(sourceFrame, cumulativeBlurStrength);
+        pushArtifact(clientBlur, sourceFrame, "client_cumulative_memory_blur");
+      } catch {
+        pushArtifact(memoryFrame.artifacts.memory_blur, sourceFrame, "server_depth_memory_blur_fallback");
+      }
+    }
   }
-
-  bundle.frames.forEach((frame) => {
-    pushArtifact(frame.artifacts.original, frame, "flow_original");
-  });
 
   return artifacts.slice(0, 20);
 }
 
-function pathToTarget(bundle: AnalysisBundle, targetFrameId: string): string[] {
-  for (const flow of bundle.flow_tree.flows) {
-    const index = flow.ordered_frame_ids.indexOf(targetFrameId);
-    if (index >= 0) {
-      return flow.ordered_frame_ids.slice(0, index + 1);
-    }
+function depthBlurStrength(frame: TargetResult["frames"][number] | undefined, pathFrameIds: string[], frameId: string): number {
+  if (typeof frame?.memory_metrics.depth_blur_strength === "number") {
+    return frame.memory_metrics.depth_blur_strength;
   }
-  const fallbackIndex = bundle.flow_tree.ordered_frame_ids.indexOf(targetFrameId);
-  return fallbackIndex >= 0 ? bundle.flow_tree.ordered_frame_ids.slice(0, fallbackIndex + 1) : [];
+  const index = pathFrameIds.indexOf(frameId);
+  const temporalDistance = index >= 0 ? pathFrameIds.length - index - 1 : frame?.temporal_distance || 1;
+  return 10 + Math.max(0, temporalDistance) * 10;
+}
+
+async function makeClientMemoryBlurArtifact(frame: FrameAnalysisResult, cumulativeBlurStrength: number): Promise<VisualArtifact> {
+  const originalImage = await loadArtifactImage(frame.artifacts.original);
+  const heatmapImage = await loadArtifactImage(frame.artifacts.heatmap);
+  const width = frame.artifacts.original.width || originalImage.naturalWidth;
+  const height = frame.artifacts.original.height || originalImage.naturalHeight;
+  const originalCanvas = imageToCanvas(originalImage, width, height);
+  const blurredCanvas = document.createElement("canvas");
+  blurredCanvas.width = width;
+  blurredCanvas.height = height;
+  const blurredContext = requiredContext(blurredCanvas);
+  blurredContext.filter = `blur(${Math.max(1, cumulativeBlurStrength).toFixed(2)}px)`;
+  blurredContext.drawImage(originalImage, 0, 0, width, height);
+
+  const heatmapCanvas = imageToCanvas(heatmapImage, width, height);
+  const outputCanvas = document.createElement("canvas");
+  outputCanvas.width = width;
+  outputCanvas.height = height;
+  const outputContext = requiredContext(outputCanvas);
+  const originalPixels = requiredContext(originalCanvas).getImageData(0, 0, width, height);
+  const blurredPixels = blurredContext.getImageData(0, 0, width, height);
+  const heatmapPixels = requiredContext(heatmapCanvas).getImageData(0, 0, width, height);
+  const outputPixels = outputContext.createImageData(width, height);
+  const retentionScale = Math.max(0.08, 1 / (1 + cumulativeBlurStrength / 25));
+
+  for (let offset = 0; offset < outputPixels.data.length; offset += 4) {
+    const heatAlpha = heatmapPixels.data[offset + 3] / 255;
+    const heatIntensity = (heatmapPixels.data[offset] + heatmapPixels.data[offset + 1] + heatmapPixels.data[offset + 2]) / (255 * 3);
+    const clarity = Math.min(1, (heatAlpha + heatIntensity * 0.15) * retentionScale);
+    outputPixels.data[offset] = originalPixels.data[offset] * clarity + blurredPixels.data[offset] * (1 - clarity);
+    outputPixels.data[offset + 1] = originalPixels.data[offset + 1] * clarity + blurredPixels.data[offset + 1] * (1 - clarity);
+    outputPixels.data[offset + 2] = originalPixels.data[offset + 2] * clarity + blurredPixels.data[offset + 2] * (1 - clarity);
+    outputPixels.data[offset + 3] = 255;
+  }
+  outputContext.putImageData(outputPixels, 0, 0);
+  const dataUrl = outputCanvas.toDataURL("image/png");
+  return {
+    artifact_type: "client_cumulative_memory_blur",
+    mime_type: "image/png",
+    base64: dataUrl.split(",", 2)[1] || dataUrl,
+    width,
+    height,
+    encoding: "base64"
+  };
+}
+
+function loadArtifactImage(artifact: VisualArtifact): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("이미지를 읽을 수 없습니다."));
+    image.src = artifactToDataUrl(artifact) || "";
+  });
+}
+
+function imageToCanvas(image: HTMLImageElement, width: number, height: number): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  requiredContext(canvas).drawImage(image, 0, 0, width, height);
+  return canvas;
+}
+
+function requiredContext(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("Canvas context를 생성할 수 없습니다.");
+  }
+  return context;
 }
 
 function copyBytes(bytes: Uint8Array): ArrayBuffer {
