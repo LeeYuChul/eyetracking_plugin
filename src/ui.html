@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Eye Tracking Heatmap</title>
+  </head>
+  <body>
+    <main class="app">
+      <header class="app-header">
+        <div>
+          <p class="eyebrow">Figma Plugin</p>
+          <h1>Eye Tracking Heatmap</h1>
+        </div>
+        <button class="icon-button" id="closeButton" type="button" title="Close">×</button>
+      </header>
+
+      <section class="panel" id="selectionPanel">
+        <div class="section-heading">
+          <h2>Selected Frame</h2>
+          <button class="text-button" id="refreshButton" type="button">Refresh</button>
+        </div>
+
+        <div class="frame-summary" id="frameSummary">
+          <span class="muted">분석할 모바일 화면 프레임을 선택해주세요.</span>
+        </div>
+
+        <ul class="message-list" id="selectionMessages"></ul>
+
+        <div class="control-grid">
+          <label class="field">
+            <span>Server</span>
+            <select id="serverSelect"></select>
+          </label>
+          <div class="field">
+            <span>Export</span>
+            <div class="segmented" role="group" aria-label="Export scale">
+              <button class="segment is-active" data-scale="1" type="button">1x</button>
+              <button class="segment" data-scale="2" type="button">2x</button>
+            </div>
+          </div>
+        </div>
+
+        <button class="primary-button" id="runButton" type="button" disabled>
+          Run Analysis
+        </button>
+      </section>
+
+      <section class="panel is-hidden" id="progressPanel" aria-live="polite">
+        <h2>Analysis Status</h2>
+        <div class="progress-track">
+          <div class="progress-bar"></div>
+        </div>
+        <p class="stage-message" id="stageMessage">분석을 준비하고 있습니다.</p>
+      </section>
+
+      <section class="panel error-panel is-hidden" id="errorPanel">
+        <h2>Analysis Error</h2>
+        <p id="errorMessage">분석 중 오류가 발생했습니다.</p>
+        <button class="secondary-button" id="retryFromErrorButton" type="button">
+          Retry
+        </button>
+      </section>
+
+      <section class="result-view is-hidden" id="resultPanel">
+        <div class="result-header">
+          <div>
+            <p class="eyebrow">Analysis Result</p>
+            <h2 id="resultFrameName">Frame</h2>
+            <p class="muted" id="completedAt">Completed</p>
+          </div>
+          <span class="status-pill">completed</span>
+        </div>
+
+        <div class="overlay-shell is-hidden" id="overlayShell">
+          <img class="frame-image" id="frameImage" alt="Selected Figma frame" />
+          <img
+            class="heatmap-image is-hidden"
+            id="overlayImage"
+            alt="Eye-tracking heatmap overlay"
+          />
+        </div>
+
+        <div class="report-section" id="summarySection">
+          <h3>Summary</h3>
+          <p id="summaryText"></p>
+        </div>
+
+        <div class="report-section" id="hotspotsSection">
+          <h3>Hotspots</h3>
+          <ul class="report-list" id="hotspotsList"></ul>
+        </div>
+
+        <div class="report-section" id="issuesSection">
+          <h3>개선 가능 영역</h3>
+          <ul class="report-list" id="issuesList"></ul>
+        </div>
+
+        <div class="report-section" id="recommendationsSection">
+          <h3>Recommendations</h3>
+          <ul class="report-list" id="recommendationsList"></ul>
+        </div>
+
+        <details class="raw-response is-hidden" id="rawResponseDetails">
+          <summary>Server Response</summary>
+          <pre id="rawResponse"></pre>
+        </details>
+
+        <p class="notice">
+          본 결과는 실제 사용자의 아이트래킹 실험 결과가 아니라, UI 이미지 기반 시선
+          예측 모델을 통해 생성된 참고용 분석 결과입니다.
+        </p>
+
+        <div class="action-row">
+          <button class="secondary-button" id="retryButton" type="button">Retry</button>
+          <button class="secondary-button" id="copyButton" type="button">Copy Report</button>
+          <button class="primary-button" id="closeResultButton" type="button">Close</button>
+        </div>
+      </section>
+
+      <button
+        class="resize-handle"
+        id="resizeHandle"
+        type="button"
+        title="Resize window"
+        aria-label="Resize window"
+      ></button>
+    </main>
+  </body>
+</html>

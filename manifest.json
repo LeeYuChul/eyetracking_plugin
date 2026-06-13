@@ -1,0 +1,13 @@
+{
+  "name": "Eye Tracking Heatmap",
+  "id": "figma-eyetrack-heatmap",
+  "api": "1.0.0",
+  "main": "dist/code.js",
+  "ui": "dist/ui.html",
+  "editorType": ["figma"],
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": ["https://eyetrack.newlearn.ai.kr"],
+    "reasoning": "The plugin sends selected Figma frame images to the analysis server to generate eye-tracking heatmaps and UX reports."
+  }
+}

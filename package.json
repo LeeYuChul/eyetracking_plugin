@@ -1,0 +1,22 @@
+{
+  "name": "figma-eyetrack-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Figma plugin for eye-tracking heatmap analysis.",
+  "scripts": {
+    "build": "webpack --mode production",
+    "dev": "webpack --mode development --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@figma/plugin-typings": "latest",
+    "css-loader": "latest",
+    "html-inline-script-webpack-plugin": "latest",
+    "html-webpack-plugin": "latest",
+    "style-loader": "latest",
+    "ts-loader": "latest",
+    "typescript": "latest",
+    "webpack": "latest",
+    "webpack-cli": "latest"
+  }
+}
