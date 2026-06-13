@@ -110,6 +110,13 @@
               <h2>UX Chat</h2>
               <span class="muted" id="chatMeta">0</span>
             </div>
+            <label class="field">
+              <span>Chat endpoint</span>
+              <select id="chatEndpointSelect">
+                <option value="vlm">/api/v1/ux/chat · VLM image chat</option>
+                <option value="heuristic">/api/v1/ux/chat/heuristic · Metric heuristic</option>
+              </select>
+            </label>
             <div class="chat-history" id="chatHistory"></div>
             <div class="chat-input-row">
               <textarea id="questionInput" rows="3" placeholder="질문을 입력하세요"></textarea>

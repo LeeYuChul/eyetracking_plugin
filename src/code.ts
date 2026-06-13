@@ -115,14 +115,14 @@ function sendSelectionInfo(): void {
   postToUi({ type: "SELECTION_INFO", payload: validateSelection() });
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max);
+function clamp(value: number, min: number): number {
+  return Math.max(value, min);
 }
 
 function resizePlugin(width: number, height: number): void {
   figma.ui.resize(
-    clamp(Math.round(width), PLUGIN_WINDOW_LIMITS.minWidth, PLUGIN_WINDOW_LIMITS.maxWidth),
-    clamp(Math.round(height), PLUGIN_WINDOW_LIMITS.minHeight, PLUGIN_WINDOW_LIMITS.maxHeight)
+    clamp(Math.round(width), PLUGIN_WINDOW_LIMITS.minWidth),
+    clamp(Math.round(height), PLUGIN_WINDOW_LIMITS.minHeight)
   );
 }
 

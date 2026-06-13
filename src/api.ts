@@ -4,6 +4,7 @@ import {
   FrameInfo,
   PLUGIN_VERSION,
   TargetResult,
+  ChatEndpointMode,
   UxEvaluationResponse,
   VisualArtifact
 } from "./types";
@@ -11,6 +12,7 @@ import {
 const FLOW_ANALYZE_PATH = "/api/v1/flow/analyze";
 const PREPARE_TARGET_PATH = "/api/v1/flow/prepare-target";
 const UX_CHAT_PATH = "/api/v1/ux/chat";
+const UX_HEURISTIC_CHAT_PATH = "/api/v1/ux/chat/heuristic";
 
 export class AnalysisApiError extends Error {
   status?: number;
@@ -86,7 +88,8 @@ export async function evaluateUx(
   bundle: AnalysisBundle,
   targetResult: TargetResult | null,
   question: string,
-  previousMessages: { role: "user" | "assistant"; content: string }[]
+  previousMessages: { role: "user" | "assistant"; content: string }[],
+  endpointMode: ChatEndpointMode
 ): Promise<UxEvaluationResponse> {
   const selectedImages = buildSelectedImages(bundle, targetResult);
   const requestBody = JSON.stringify({
@@ -105,7 +108,8 @@ export async function evaluateUx(
     },
     previous_messages: previousMessages
   });
-  const response = await fetch(buildUrl(apiBaseUrl, UX_CHAT_PATH), {
+  const path = endpointMode === "heuristic" ? UX_HEURISTIC_CHAT_PATH : UX_CHAT_PATH;
+  const response = await fetch(buildUrl(apiBaseUrl, path), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: requestBody

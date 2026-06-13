@@ -11,9 +11,7 @@ export const MOBILE_FRAME_LIMITS = {
 
 export const PLUGIN_WINDOW_LIMITS = {
   minWidth: 520,
-  maxWidth: 1100,
-  minHeight: 640,
-  maxHeight: 1100
+  minHeight: 640
 };
 
 export const MAX_FRAME_COUNT = 15;
@@ -40,6 +38,8 @@ export type ViewMode =
   | "heatmap_overlay"
   | "scanpath_overlay"
   | "full_overlay";
+
+export type ChatEndpointMode = "vlm" | "heuristic";
 
 export interface FrameInfo {
   id: string;

@@ -9,6 +9,7 @@ import "./styles.css";
 import {
   AnalysisBundle,
   AppStage,
+  ChatEndpointMode,
   ChatEntry,
   DEFAULT_API_BASE_URL,
   ExportScale,
@@ -43,6 +44,7 @@ let selectionCanAnalyze = false;
 let session: LocalSession | null = null;
 let targetFrameId: string | null = null;
 let viewMode: ViewMode = "original";
+let chatEndpointMode: ChatEndpointMode = "vlm";
 let activePage: "analysis" | "results" = "analysis";
 
 const elements = {
@@ -57,6 +59,7 @@ const elements = {
   clearButton: byId<HTMLButtonElement>("clearButton"),
   askButton: byId<HTMLButtonElement>("askButton"),
   targetSelect: byId<HTMLSelectElement>("targetSelect"),
+  chatEndpointSelect: byId<HTMLSelectElement>("chatEndpointSelect"),
   questionInput: byId<HTMLTextAreaElement>("questionInput"),
   selectionStatus: byId<HTMLSpanElement>("selectionStatus"),
   stagePill: byId<HTMLSpanElement>("stagePill"),
@@ -97,6 +100,9 @@ function bindEvents(): void {
   elements.askButton.addEventListener("click", askQuestion);
   elements.targetSelect.addEventListener("change", () => {
     void selectTarget(elements.targetSelect.value);
+  });
+  elements.chatEndpointSelect.addEventListener("change", () => {
+    chatEndpointMode = elements.chatEndpointSelect.value === "heuristic" ? "heuristic" : "vlm";
   });
   document.querySelectorAll<HTMLButtonElement>("[data-scale]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -267,7 +273,14 @@ async function askQuestion(): Promise<void> {
       { role: "user" as const, content: entry.question },
       { role: "assistant" as const, content: entry.answer.conclusion }
     ]);
-    const response = await evaluateUx(apiBaseUrl, session.analysis_bundle, targetResult, question, previousMessages);
+    const response = await evaluateUx(
+      apiBaseUrl,
+      session.analysis_bundle,
+      targetResult,
+      question,
+      previousMessages,
+      chatEndpointMode
+    );
     const chatEntry: ChatEntry = {
       question,
       answer: response.answer,
@@ -629,8 +642,8 @@ function bindResizeHandle(): void {
       postToPlugin({
         type: "RESIZE_PLUGIN",
         payload: {
-          width: clamp(startWidth + moveEvent.clientX - startX, PLUGIN_WINDOW_LIMITS.minWidth, PLUGIN_WINDOW_LIMITS.maxWidth),
-          height: clamp(startHeight + moveEvent.clientY - startY, PLUGIN_WINDOW_LIMITS.minHeight, PLUGIN_WINDOW_LIMITS.maxHeight)
+          width: clamp(startWidth + moveEvent.clientX - startX, PLUGIN_WINDOW_LIMITS.minWidth),
+          height: clamp(startHeight + moveEvent.clientY - startY, PLUGIN_WINDOW_LIMITS.minHeight)
         }
       });
     };
@@ -650,8 +663,8 @@ function bindResizeHandle(): void {
   });
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.round(Math.min(Math.max(value, min), max));
+function clamp(value: number, min: number): number {
+  return Math.round(Math.max(value, min));
 }
 
 function postToPlugin(message: UiToMainMessage): void {
