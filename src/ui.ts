@@ -7,7 +7,6 @@ import {
 } from "./api";
 import "./styles.css";
 import {
-  API_BASE_OPTIONS,
   AnalysisBundle,
   AppStage,
   ChatEntry,
@@ -52,7 +51,6 @@ const elements = {
   retryButton: byId<HTMLButtonElement>("retryButton"),
   clearButton: byId<HTMLButtonElement>("clearButton"),
   askButton: byId<HTMLButtonElement>("askButton"),
-  serverSelect: byId<HTMLSelectElement>("serverSelect"),
   targetSelect: byId<HTMLSelectElement>("targetSelect"),
   questionInput: byId<HTMLTextAreaElement>("questionInput"),
   selectionStatus: byId<HTMLSpanElement>("selectionStatus"),
@@ -74,7 +72,6 @@ const elements = {
 };
 
 function init(): void {
-  hydrateServerSelect();
   bindEvents();
   postToPlugin({ type: "REFRESH_SELECTION" });
   postToPlugin({ type: "LOAD_SESSION" });
@@ -87,9 +84,6 @@ function bindEvents(): void {
   elements.retryButton.addEventListener("click", requestAnalysis);
   elements.clearButton.addEventListener("click", clearCurrentSession);
   elements.askButton.addEventListener("click", askQuestion);
-  elements.serverSelect.addEventListener("change", () => {
-    apiBaseUrl = elements.serverSelect.value;
-  });
   elements.targetSelect.addEventListener("change", () => {
     void selectTarget(elements.targetSelect.value);
   });
@@ -107,17 +101,6 @@ function bindEvents(): void {
     });
   });
   bindResizeHandle();
-}
-
-function hydrateServerSelect(): void {
-  elements.serverSelect.innerHTML = "";
-  API_BASE_OPTIONS.forEach((option) => {
-    const element = document.createElement("option");
-    element.value = option.value;
-    element.textContent = option.label;
-    elements.serverSelect.append(element);
-  });
-  elements.serverSelect.value = apiBaseUrl;
 }
 
 function handlePluginMessage(message: MainToUiMessage): void {

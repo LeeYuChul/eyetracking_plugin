@@ -13,7 +13,7 @@ Figma Desktop에서 `manifest.json`을 import하면 됩니다. 개발 중에는 
 
 ## API
 
-분석 서버 기본 URL은 `https://eyetrack.teamnewlarn.ai.kr`입니다.
+분석 서버 기본 URL은 `https://eyetrack.newlearn.ai.kr`입니다.
 
 - `GET /api/v1/health`
 - `POST /api/v1/flow/analyze`

@@ -1,11 +1,6 @@
 export const PLUGIN_VERSION = "0.2.0";
 
-export const DEFAULT_API_BASE_URL = "https://eyetrack.teamnewlarn.ai.kr";
-
-export const API_BASE_OPTIONS = [
-  { label: "Production", value: DEFAULT_API_BASE_URL },
-  { label: "Local", value: "http://127.0.0.1:3781" }
-] as const;
+export const DEFAULT_API_BASE_URL = "https://eyetrack.newlearn.ai.kr";
 
 export const MOBILE_FRAME_LIMITS = {
   minWidth: 320,
