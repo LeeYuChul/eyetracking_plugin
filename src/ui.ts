@@ -265,10 +265,10 @@ async function askQuestion(): Promise<void> {
     return;
   }
 
-  const targetResult = currentTargetResult();
   setRunning(true);
   showProgress("evaluating_ux");
   try {
+    const targetResult = await ensureTargetResultForChat();
     const previousMessages = session.chat_history.flatMap((entry) => [
       { role: "user" as const, content: entry.question },
       { role: "assistant" as const, content: entry.answer.conclusion }
@@ -301,6 +301,26 @@ async function askQuestion(): Promise<void> {
   } finally {
     setRunning(false);
   }
+}
+
+async function ensureTargetResultForChat(): Promise<TargetResult | null> {
+  if (!session || !targetFrameId) {
+    return null;
+  }
+  const existing = session.target_results[targetFrameId];
+  if (existing) {
+    return existing;
+  }
+  showProgress("preparing_target");
+  const targetResult = await prepareTarget(apiBaseUrl, session.analysis_bundle, targetFrameId);
+  session = {
+    ...session,
+    target_results: { ...session.target_results, [targetFrameId]: targetResult },
+    last_opened_at: new Date().toISOString()
+  };
+  postToPlugin({ type: "SAVE_SESSION", payload: { session } });
+  showProgress("evaluating_ux");
+  return targetResult;
 }
 
 function createSession(bundle: AnalysisBundle): LocalSession {
@@ -471,7 +491,7 @@ function renderMetrics(): void {
 function renderChat(): void {
   elements.chatHistory.innerHTML = "";
   const entries = session?.chat_history || [];
-  elements.chatMeta.textContent = String(entries.length);
+  elements.chatMeta.textContent = `${chatEndpointMode} · ${entries.length}`;
   entries.forEach((entry) => {
     const item = document.createElement("div");
     item.className = "chat-item";

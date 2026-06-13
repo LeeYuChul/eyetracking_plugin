@@ -162,37 +162,72 @@ function buildSelectedImages(bundle: AnalysisBundle, targetResult: TargetResult 
   const artifacts: VisualArtifact[] = [];
   const targetId = targetResult?.target_frame_id || bundle.flow_tree.ordered_frame_ids[0];
   const targetFrame = bundle.frames.find((frame) => frame.client_frame_id === targetId);
+  const pathIds = targetResult?.path_frame_ids || pathToTarget(bundle, targetId);
+  const pushed = new Set<string>();
+
+  const pushArtifact = (
+    artifact: VisualArtifact | undefined,
+    frame: { client_frame_id: string; frame_name: string },
+    role: string
+  ): void => {
+    if (!artifact?.base64) {
+      return;
+    }
+    const key = `${frame.client_frame_id}:${artifact.artifact_type}:${role}`;
+    if (pushed.has(key)) {
+      return;
+    }
+    pushed.add(key);
+    artifacts.push({
+      ...artifact,
+      frame_id: frame.client_frame_id,
+      frame_name: frame.frame_name,
+      image_role: role
+    } as VisualArtifact);
+  };
+
   if (targetFrame?.artifacts.original) {
-    artifacts.push(withFrameContext(targetFrame.artifacts.original, targetFrame));
+    pushArtifact(targetFrame.artifacts.original, targetFrame, "target_original");
   }
   if (targetFrame?.artifacts.heatmap_overlay) {
-    artifacts.push(withFrameContext(targetFrame.artifacts.heatmap_overlay, targetFrame));
+    pushArtifact(targetFrame.artifacts.heatmap_overlay, targetFrame, "target_heatmap_overlay");
   }
+  if (targetFrame?.artifacts.scanpath_overlay) {
+    pushArtifact(targetFrame.artifacts.scanpath_overlay, targetFrame, "target_scanpath_overlay");
+  }
+
+  pathIds.forEach((frameId) => {
+    const frame = bundle.frames.find((item) => item.client_frame_id === frameId);
+    if (frame) {
+      pushArtifact(frame.artifacts.original, frame, frameId === targetId ? "target_path_original" : "path_original");
+    }
+  });
+
   if (targetResult) {
-    targetResult.frames.slice(0, 3).forEach((frame) => {
+    targetResult.frames.forEach((frame) => {
       const sourceFrame = bundle.frames.find((item) => item.client_frame_id === frame.client_frame_id);
-      if (sourceFrame?.artifacts.original) {
-        artifacts.push(withFrameContext(sourceFrame.artifacts.original, sourceFrame));
-      }
-      const fullOverlay = frame.artifacts.full_overlay;
-      if (fullOverlay) {
-        artifacts.push({
-          ...fullOverlay,
-          frame_id: frame.client_frame_id,
-          frame_name: sourceFrame?.frame_name || frame.client_frame_id
-        } as VisualArtifact);
-      }
+      const frameContext = sourceFrame || { client_frame_id: frame.client_frame_id, frame_name: frame.client_frame_id };
+      pushArtifact(frame.artifacts.memory_blur, frameContext, "memory_blur");
+      pushArtifact(frame.artifacts.full_overlay, frameContext, "memory_full_overlay");
     });
   }
-  return artifacts.slice(0, 6);
+
+  bundle.frames.forEach((frame) => {
+    pushArtifact(frame.artifacts.original, frame, "flow_original");
+  });
+
+  return artifacts.slice(0, 20);
 }
 
-function withFrameContext(artifact: VisualArtifact, frame: { client_frame_id: string; frame_name: string }): VisualArtifact {
-  return {
-    ...artifact,
-    frame_id: frame.client_frame_id,
-    frame_name: frame.frame_name
-  } as VisualArtifact;
+function pathToTarget(bundle: AnalysisBundle, targetFrameId: string): string[] {
+  for (const flow of bundle.flow_tree.flows) {
+    const index = flow.ordered_frame_ids.indexOf(targetFrameId);
+    if (index >= 0) {
+      return flow.ordered_frame_ids.slice(0, index + 1);
+    }
+  }
+  const fallbackIndex = bundle.flow_tree.ordered_frame_ids.indexOf(targetFrameId);
+  return fallbackIndex >= 0 ? bundle.flow_tree.ordered_frame_ids.slice(0, fallbackIndex + 1) : [];
 }
 
 function copyBytes(bytes: Uint8Array): ArrayBuffer {
