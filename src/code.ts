@@ -2,15 +2,17 @@ import {
   ExportScale,
   FrameInfo,
   MainToUiMessage,
+  MAX_FRAME_COUNT,
   MOBILE_FRAME_LIMITS,
   PLUGIN_WINDOW_LIMITS,
   SelectionInfo,
+  STORAGE_KEY,
   UiToMainMessage
 } from "./types";
 
 figma.showUI(__html__, {
-  width: 420,
-  height: 680,
+  width: 760,
+  height: 820,
   themeColors: true
 });
 
@@ -22,12 +24,20 @@ function roundDimension(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-function frameToInfo(frame: FrameNode): FrameInfo {
+function sanitizeKey(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_.-]/g, "_");
+}
+
+function frameToInfo(frame: FrameNode, orderIndex: number): FrameInfo {
+  const clientFrameId = `local_${sanitizeKey(frame.id)}`;
   return {
     id: frame.id,
+    clientFrameId,
+    fileKey: `${clientFrameId}_${orderIndex}`,
     name: frame.name,
     width: roundDimension(frame.width),
-    height: roundDimension(frame.height)
+    height: roundDimension(frame.height),
+    orderIndex
   };
 }
 
@@ -38,92 +48,71 @@ function validateSelection(): SelectionInfo {
     return {
       status: "invalid",
       canAnalyze: false,
-      frame: null,
-      message: "분석할 모바일 프레임을 1개 선택해주세요.",
+      frames: [],
+      message: "분석할 Frame을 선택해주세요.",
       warnings: []
     };
   }
 
-  if (selection.length > 1) {
+  if (selection.length > MAX_FRAME_COUNT) {
     return {
       status: "invalid",
       canAnalyze: false,
-      frame: null,
-      message: "MVP에서는 한 번에 1개의 프레임만 분석할 수 있습니다.",
+      frames: [],
+      message: `한 번에 최대 ${MAX_FRAME_COUNT}개 Frame까지 분석할 수 있습니다.`,
       warnings: []
     };
   }
 
-  const node = selection[0];
-  if (node.type !== "FRAME") {
-    return {
-      status: "invalid",
-      canAnalyze: false,
-      frame: null,
-      message: "선택한 객체는 Frame이 아닙니다. Frame을 선택해주세요.",
-      warnings: []
-    };
-  }
-
-  const frame = node as FrameNode;
-  const frameInfo = frameToInfo(frame);
-
-  if (frameInfo.width <= 0 || frameInfo.height <= 0) {
-    return {
-      status: "invalid",
-      canAnalyze: false,
-      frame: frameInfo,
-      message: "프레임의 너비와 높이는 0보다 커야 합니다.",
-      warnings: []
-    };
-  }
-
-  if (!frame.visible) {
-    return {
-      status: "invalid",
-      canAnalyze: false,
-      frame: frameInfo,
-      message: "숨겨진 프레임은 분석할 수 없습니다.",
-      warnings: []
-    };
-  }
-
+  const frames: FrameInfo[] = [];
   const warnings: string[] = [];
-  if (
-    frameInfo.width < MOBILE_FRAME_LIMITS.minWidth ||
-    frameInfo.width > MOBILE_FRAME_LIMITS.maxWidth
-  ) {
-    warnings.push(
-      `권장 모바일 너비는 ${MOBILE_FRAME_LIMITS.minWidth}-${MOBILE_FRAME_LIMITS.maxWidth}px입니다.`
-    );
-  }
 
-  if (
-    frameInfo.height < MOBILE_FRAME_LIMITS.minHeight ||
-    frameInfo.height > MOBILE_FRAME_LIMITS.maxHeight
-  ) {
-    warnings.push(
-      `권장 모바일 높이는 ${MOBILE_FRAME_LIMITS.minHeight}-${MOBILE_FRAME_LIMITS.maxHeight}px입니다.`
-    );
+  for (const [index, node] of selection.entries()) {
+    if (node.type !== "FRAME") {
+      return {
+        status: "invalid",
+        canAnalyze: false,
+        frames,
+        message: "선택 항목에는 Frame만 포함되어야 합니다.",
+        warnings
+      };
+    }
+
+    const frame = node as FrameNode;
+    const info = frameToInfo(frame, index);
+    frames.push(info);
+
+    if (!frame.visible) {
+      warnings.push(`${frame.name}: 숨겨진 Frame입니다.`);
+    }
+    if (info.width <= 0 || info.height <= 0) {
+      return {
+        status: "invalid",
+        canAnalyze: false,
+        frames,
+        message: "Frame의 너비와 높이는 0보다 커야 합니다.",
+        warnings
+      };
+    }
+    if (info.width < MOBILE_FRAME_LIMITS.minWidth || info.width > MOBILE_FRAME_LIMITS.maxWidth) {
+      warnings.push(`${frame.name}: 권장 모바일 너비를 벗어났습니다.`);
+    }
+    if (info.height < MOBILE_FRAME_LIMITS.minHeight || info.height > MOBILE_FRAME_LIMITS.maxHeight) {
+      warnings.push(`${frame.name}: 권장 모바일 높이를 벗어났습니다.`);
+    }
   }
 
   return {
     status: warnings.length > 0 ? "warning" : "valid",
-    canAnalyze: true,
-    frame: frameInfo,
-    message:
-      warnings.length > 0
-        ? "모바일 권장 크기를 벗어났지만 분석을 실행할 수 있습니다."
-        : "선택된 프레임을 분석할 수 있습니다.",
+    canAnalyze: frames.length > 0,
+    frames,
+    message: `${frames.length}개 Frame을 분석할 수 있습니다.`,
     warnings
   };
 }
 
 function sendSelectionInfo(): void {
-  postToUi({
-    type: "SELECTION_INFO",
-    payload: validateSelection()
-  });
+  postToUi({ type: "SELECTION_INFO", payload: validateSelection() });
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -137,85 +126,84 @@ function resizePlugin(width: number, height: number): void {
   );
 }
 
-async function exportSelectedFrame(exportScale: ExportScale): Promise<void> {
+async function exportSelectedFrames(exportScale: ExportScale): Promise<void> {
   const selection = validateSelection();
-
-  if (!selection.canAnalyze || !selection.frame) {
-    postToUi({
-      type: "ERROR",
-      payload: {
-        message: selection.message
-      }
-    });
-    return;
-  }
-
-  const selectedNode = figma.currentPage.selection[0];
-  if (!selectedNode || selectedNode.type !== "FRAME") {
-    postToUi({
-      type: "ERROR",
-      payload: {
-        message: "선택한 객체는 Frame이 아닙니다. Frame을 선택해주세요."
-      }
-    });
+  if (!selection.canAnalyze) {
+    postToUi({ type: "ERROR", payload: { message: selection.message, source: "plugin" } });
     return;
   }
 
   postToUi({
     type: "EXPORT_STARTED",
-    payload: {
-      exportScale
-    }
+    payload: { exportScale, frameCount: selection.frames.length }
   });
 
   try {
-    const bytes = await selectedNode.exportAsync({
-      format: "PNG",
-      constraint: {
-        type: "SCALE",
-        value: exportScale
+    const exported = [];
+    for (const frameInfo of selection.frames) {
+      const node = figma.getNodeById(frameInfo.id);
+      if (!node || node.type !== "FRAME") {
+        throw new Error(`${frameInfo.name} Frame을 찾을 수 없습니다.`);
       }
-    });
-
-    postToUi({
-      type: "EXPORT_SUCCESS",
-      payload: {
-        frame: selection.frame,
-        exportScale,
-        bytes
-      }
-    });
+      const bytes = await (node as FrameNode).exportAsync({
+        format: "PNG",
+        constraint: { type: "SCALE", value: exportScale }
+      });
+      exported.push({ frame: frameInfo, exportScale, bytes });
+    }
+    postToUi({ type: "EXPORT_SUCCESS", payload: { frames: exported, exportScale } });
   } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "프레임 이미지를 변환하지 못했습니다.";
-
-    postToUi({
-      type: "EXPORT_FAILED",
-      payload: {
-        message: `프레임 이미지를 변환하지 못했습니다. ${message}`
-      }
-    });
+    const message = error instanceof Error ? error.message : "Frame export에 실패했습니다.";
+    postToUi({ type: "EXPORT_FAILED", payload: { message } });
   }
+}
+
+async function loadSession(): Promise<void> {
+  const session = await figma.clientStorage.getAsync(STORAGE_KEY);
+  postToUi({ type: "STORAGE_LOADED", payload: { session: session || null } });
+}
+
+async function saveSession(message: Extract<UiToMainMessage, { type: "SAVE_SESSION" }>): Promise<void> {
+  await figma.clientStorage.setAsync(STORAGE_KEY, message.payload.session);
+  postToUi({ type: "STORAGE_SAVED", payload: { session: message.payload.session } });
+}
+
+async function clearSession(): Promise<void> {
+  await figma.clientStorage.deleteAsync(STORAGE_KEY);
+  postToUi({ type: "STORAGE_CLEARED" });
 }
 
 figma.ui.onmessage = (message: UiToMainMessage) => {
   if (message.type === "RUN_ANALYSIS") {
-    void exportSelectedFrame(message.payload.exportScale);
+    void exportSelectedFrames(message.payload.exportScale);
     return;
   }
-
   if (message.type === "REFRESH_SELECTION") {
     sendSelectionInfo();
     return;
   }
-
+  if (message.type === "LOAD_SESSION") {
+    void loadSession().catch((error) => {
+      postToUi({ type: "ERROR", payload: { message: String(error), source: "storage" } });
+    });
+    return;
+  }
+  if (message.type === "SAVE_SESSION") {
+    void saveSession(message).catch((error) => {
+      postToUi({ type: "ERROR", payload: { message: String(error), source: "storage" } });
+    });
+    return;
+  }
+  if (message.type === "CLEAR_CURRENT_SESSION" || message.type === "CLEAR_ALL_SESSIONS") {
+    void clearSession().catch((error) => {
+      postToUi({ type: "ERROR", payload: { message: String(error), source: "storage" } });
+    });
+    return;
+  }
   if (message.type === "RESIZE_PLUGIN") {
     resizePlugin(message.payload.width, message.payload.height);
     return;
   }
-
   if (message.type === "CLOSE_PLUGIN") {
     figma.closePlugin();
   }
@@ -223,3 +211,4 @@ figma.ui.onmessage = (message: UiToMainMessage) => {
 
 figma.on("selectionchange", sendSelectionInfo);
 sendSelectionInfo();
+void loadSession();

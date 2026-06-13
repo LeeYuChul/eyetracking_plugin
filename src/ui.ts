@@ -1,80 +1,75 @@
 import {
-  createAnalysis,
+  analyzeFlow,
+  artifactToDataUrl,
+  evaluateUx,
   friendlyErrorMessage,
-  isFailed,
-  normalizeAnalysisResponse,
-  waitForAnalysis
+  prepareTarget
 } from "./api";
 import "./styles.css";
 import {
   API_BASE_OPTIONS,
-  AnalysisResult,
-  AnalysisStage,
+  AnalysisBundle,
+  AppStage,
+  ChatEntry,
   DEFAULT_API_BASE_URL,
   ExportScale,
-  ExportedFramePayload,
+  ExportedFlowPayload,
+  FlowFrameNode,
+  FrameAnalysisResult,
+  LocalSession,
   MainToUiMessage,
   PLUGIN_WINDOW_LIMITS,
-  PLUGIN_VERSION,
-  ReportItem,
   SelectionInfo,
-  UiToMainMessage
+  TargetResult,
+  UiToMainMessage,
+  ViewMode
 } from "./types";
 
-const STAGE_MESSAGES: Record<AnalysisStage, string> = {
-  idle: "분석을 준비하고 있습니다.",
-  exporting: "Figma 프레임을 이미지로 변환 중입니다.",
-  uploading: "서버로 이미지를 업로드 중입니다.",
-  queued: "분석 대기 중입니다.",
-  running: "아이트래킹 히트맵을 생성 중입니다.",
-  completed: "분석이 완료되었습니다.",
-  failed: "분석 중 오류가 발생했습니다.",
-  timeout: "분석 시간이 오래 걸리고 있습니다. 다시 시도해주세요."
+const STAGE_MESSAGES: Record<AppStage, string> = {
+  idle: "대기 중입니다.",
+  exporting: "Figma Frame을 PNG로 export 중입니다.",
+  uploading: "서버로 Flow 분석 요청을 전송 중입니다.",
+  analyzing: "Heatmap과 Scanpath를 생성 중입니다.",
+  saving_local: "로컬 세션을 저장 중입니다.",
+  ready: "분석 결과를 표시합니다.",
+  preparing_target: "Target 기준 Memory Blur를 준비 중입니다.",
+  evaluating_ux: "UX 질문을 평가 중입니다.",
+  error: "오류가 발생했습니다."
 };
 
-const REPORT_NOTICE =
-  "본 결과는 실제 사용자의 아이트래킹 실험 결과가 아니라, UI 이미지 기반 시선 예측 모델을 통해 생성된 참고용 분석 결과입니다.";
-
-let selectedFrame: SelectionInfo | null = null;
 let exportScale: ExportScale = 1;
 let apiBaseUrl = DEFAULT_API_BASE_URL;
 let isRunning = false;
-let lastExport: ExportedFramePayload | null = null;
-let lastResult: AnalysisResult | null = null;
-let frameImageUrl: string | null = null;
+let selectionCanAnalyze = false;
+let session: LocalSession | null = null;
+let targetFrameId: string | null = null;
+let viewMode: ViewMode = "original";
 
 const elements = {
   closeButton: byId<HTMLButtonElement>("closeButton"),
   refreshButton: byId<HTMLButtonElement>("refreshButton"),
   runButton: byId<HTMLButtonElement>("runButton"),
   retryButton: byId<HTMLButtonElement>("retryButton"),
-  retryFromErrorButton: byId<HTMLButtonElement>("retryFromErrorButton"),
-  copyButton: byId<HTMLButtonElement>("copyButton"),
-  closeResultButton: byId<HTMLButtonElement>("closeResultButton"),
+  clearButton: byId<HTMLButtonElement>("clearButton"),
+  askButton: byId<HTMLButtonElement>("askButton"),
   serverSelect: byId<HTMLSelectElement>("serverSelect"),
-  frameSummary: byId<HTMLDivElement>("frameSummary"),
+  targetSelect: byId<HTMLSelectElement>("targetSelect"),
+  questionInput: byId<HTMLTextAreaElement>("questionInput"),
+  selectionStatus: byId<HTMLSpanElement>("selectionStatus"),
+  stagePill: byId<HTMLSpanElement>("stagePill"),
+  frameList: byId<HTMLDivElement>("frameList"),
   selectionMessages: byId<HTMLUListElement>("selectionMessages"),
   progressPanel: byId<HTMLElement>("progressPanel"),
+  stageMessage: byId<HTMLParagraphElement>("stageMessage"),
   errorPanel: byId<HTMLElement>("errorPanel"),
   errorMessage: byId<HTMLParagraphElement>("errorMessage"),
-  resultPanel: byId<HTMLElement>("resultPanel"),
-  selectionPanel: byId<HTMLElement>("selectionPanel"),
-  stageMessage: byId<HTMLParagraphElement>("stageMessage"),
-  resultFrameName: byId<HTMLHeadingElement>("resultFrameName"),
-  completedAt: byId<HTMLParagraphElement>("completedAt"),
-  overlayShell: byId<HTMLDivElement>("overlayShell"),
-  frameImage: byId<HTMLImageElement>("frameImage"),
-  overlayImage: byId<HTMLImageElement>("overlayImage"),
-  summarySection: byId<HTMLElement>("summarySection"),
-  summaryText: byId<HTMLParagraphElement>("summaryText"),
-  hotspotsSection: byId<HTMLElement>("hotspotsSection"),
-  hotspotsList: byId<HTMLUListElement>("hotspotsList"),
-  issuesSection: byId<HTMLElement>("issuesSection"),
-  issuesList: byId<HTMLUListElement>("issuesList"),
-  recommendationsSection: byId<HTMLElement>("recommendationsSection"),
-  recommendationsList: byId<HTMLUListElement>("recommendationsList"),
-  rawResponseDetails: byId<HTMLDetailsElement>("rawResponseDetails"),
-  rawResponse: byId<HTMLPreElement>("rawResponse"),
+  workspacePanel: byId<HTMLElement>("workspacePanel"),
+  flowTree: byId<HTMLDivElement>("flowTree"),
+  flowViewer: byId<HTMLDivElement>("flowViewer"),
+  metricGrid: byId<HTMLDivElement>("metricGrid"),
+  bundleMeta: byId<HTMLSpanElement>("bundleMeta"),
+  chatHistory: byId<HTMLDivElement>("chatHistory"),
+  chatMeta: byId<HTMLSpanElement>("chatMeta"),
   resizeHandle: byId<HTMLButtonElement>("resizeHandle")
 };
 
@@ -82,314 +77,466 @@ function init(): void {
   hydrateServerSelect();
   bindEvents();
   postToPlugin({ type: "REFRESH_SELECTION" });
+  postToPlugin({ type: "LOAD_SESSION" });
 }
 
 function bindEvents(): void {
   elements.closeButton.addEventListener("click", closePlugin);
-  elements.closeResultButton.addEventListener("click", closePlugin);
-  elements.refreshButton.addEventListener("click", () => {
-    postToPlugin({ type: "REFRESH_SELECTION" });
-  });
+  elements.refreshButton.addEventListener("click", () => postToPlugin({ type: "REFRESH_SELECTION" }));
   elements.runButton.addEventListener("click", requestAnalysis);
   elements.retryButton.addEventListener("click", requestAnalysis);
-  elements.retryFromErrorButton.addEventListener("click", requestAnalysis);
-  elements.copyButton.addEventListener("click", copyReport);
+  elements.clearButton.addEventListener("click", clearCurrentSession);
+  elements.askButton.addEventListener("click", askQuestion);
   elements.serverSelect.addEventListener("change", () => {
     apiBaseUrl = elements.serverSelect.value;
   });
-  bindResizeHandle();
-
+  elements.targetSelect.addEventListener("change", () => {
+    void selectTarget(elements.targetSelect.value);
+  });
   document.querySelectorAll<HTMLButtonElement>("[data-scale]").forEach((button) => {
     button.addEventListener("click", () => {
-      const scale = Number(button.dataset.scale) === 2 ? 2 : 1;
-      exportScale = scale;
-      document.querySelectorAll<HTMLButtonElement>("[data-scale]").forEach((item) => {
-        item.classList.toggle("is-active", item === button);
-      });
+      exportScale = Number(button.dataset.scale) === 2 ? 2 : 1;
+      setActiveButton("[data-scale]", button);
     });
   });
+  document.querySelectorAll<HTMLButtonElement>("[data-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      viewMode = (button.dataset.view || "original") as ViewMode;
+      setActiveButton("[data-view]", button);
+      renderWorkspace();
+    });
+  });
+  bindResizeHandle();
 }
 
 function hydrateServerSelect(): void {
   elements.serverSelect.innerHTML = "";
-
   API_BASE_OPTIONS.forEach((option) => {
-    const optionElement = document.createElement("option");
-    optionElement.value = option.value;
-    optionElement.textContent = option.label;
-    elements.serverSelect.append(optionElement);
+    const element = document.createElement("option");
+    element.value = option.value;
+    element.textContent = option.label;
+    elements.serverSelect.append(element);
   });
-
-  if (!API_BASE_OPTIONS.some((option) => option.value === apiBaseUrl)) {
-    apiBaseUrl = DEFAULT_API_BASE_URL;
-  }
-
   elements.serverSelect.value = apiBaseUrl;
 }
 
 function handlePluginMessage(message: MainToUiMessage): void {
   if (message.type === "SELECTION_INFO") {
-    selectedFrame = message.payload;
+    selectionCanAnalyze = message.payload.canAnalyze;
     renderSelection(message.payload);
+    updateButtons();
     return;
   }
-
   if (message.type === "EXPORT_STARTED") {
     setRunning(true);
     showProgress("exporting");
     return;
   }
-
   if (message.type === "EXPORT_SUCCESS") {
     void runAnalysis(message.payload);
     return;
   }
-
   if (message.type === "EXPORT_FAILED") {
-    setRunning(false);
-    showError(message.payload.message);
+    showError(message.payload.message, "plugin");
     return;
   }
-
+  if (message.type === "STORAGE_LOADED") {
+    session = message.payload.session;
+    targetFrameId = defaultTargetFrameId(session?.analysis_bundle || null);
+    renderWorkspace();
+    return;
+  }
+  if (message.type === "STORAGE_SAVED") {
+    session = message.payload.session;
+    renderWorkspace();
+    return;
+  }
+  if (message.type === "STORAGE_CLEARED") {
+    session = null;
+    targetFrameId = null;
+    renderWorkspace();
+    return;
+  }
   if (message.type === "ERROR") {
-    setRunning(false);
-    showError(message.payload.message);
+    showError(message.payload.message, message.payload.source || "plugin");
   }
 }
 
-function renderSelection(selection: SelectionInfo): void {
+function renderSelection(info: SelectionInfo): void {
+  elements.selectionStatus.textContent = info.status;
+  elements.frameList.innerHTML = "";
   elements.selectionMessages.innerHTML = "";
 
-  if (!selection.frame) {
-    elements.frameSummary.innerHTML =
-      '<span class="muted">분석할 모바일 화면 프레임을 선택해주세요.</span>';
-  } else {
-    elements.frameSummary.innerHTML = "";
-    const name = document.createElement("div");
-    name.className = "frame-name";
-    name.textContent = selection.frame.name;
-
-    const size = document.createElement("div");
-    size.className = "frame-size";
-    size.textContent = `${selection.frame.width}px × ${selection.frame.height}px`;
-
-    elements.frameSummary.append(name, size);
+  if (info.frames.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "frame-row";
+    empty.textContent = "선택된 Frame 없음";
+    elements.frameList.append(empty);
   }
 
-  appendMessage(selection.message, selection.status === "invalid" ? "error" : undefined);
-  selection.warnings.forEach((warning) => appendMessage(warning, "warning"));
-  elements.runButton.disabled = isRunning || !selection.canAnalyze;
+  info.frames.forEach((frame) => {
+    const row = document.createElement("div");
+    row.className = "frame-row";
+    const main = document.createElement("div");
+    const name = document.createElement("div");
+    name.className = "frame-name";
+    name.textContent = frame.name;
+    const size = document.createElement("div");
+    size.className = "frame-size";
+    size.textContent = `${frame.width}px x ${frame.height}px`;
+    main.append(name, size);
+    const order = document.createElement("span");
+    order.className = "status-pill";
+    order.textContent = String(frame.orderIndex + 1);
+    row.append(main, order);
+    elements.frameList.append(row);
+  });
+
+  appendMessage(info.message, info.status === "invalid" ? "error" : undefined);
+  info.warnings.forEach((warning) => appendMessage(warning, "warning"));
 }
 
 function requestAnalysis(): void {
-  if (isRunning) {
+  if (isRunning || !selectionCanAnalyze) {
     return;
   }
-
-  if (!selectedFrame?.canAnalyze) {
-    showError(selectedFrame?.message || "분석할 모바일 프레임을 1개 선택해주세요.");
-    return;
-  }
-
   hideError();
-  hideResult();
-  setRunning(true);
-  postToPlugin({
-    type: "RUN_ANALYSIS",
-    payload: {
-      exportScale
-    }
-  });
+  postToPlugin({ type: "RUN_ANALYSIS", payload: { exportScale } });
 }
 
-async function runAnalysis(payload: ExportedFramePayload): Promise<void> {
-  lastExport = payload;
-  showProgress("uploading");
-
+async function runAnalysis(payload: ExportedFlowPayload): Promise<void> {
   try {
-    const createResponse = await createAnalysis({
-      apiBaseUrl,
-      fileBytes: new Uint8Array(payload.bytes),
-      frame: payload.frame,
-      exportScale: payload.exportScale,
-      pluginVersion: PLUGIN_VERSION,
-      modelName: "umsi++",
-      options: {
-        source: "figma-plugin",
-        requested_at: new Date().toISOString()
-      }
-    });
-
-    showProgress("queued");
-    const result = await waitForAnalysis(createResponse, apiBaseUrl, showProgress);
-
-    if (isFailed(result)) {
-      showProgress(result.status === "timeout" ? "timeout" : "failed");
-      showError(
-        result.status === "timeout"
-          ? STAGE_MESSAGES.timeout
-          : "서버에서 분석을 완료하지 못했습니다."
-      );
-      return;
+    showProgress("uploading");
+    const bundle = await analyzeFlow(apiBaseUrl, payload);
+    showProgress("saving_local");
+    const nextSession = createSession(bundle);
+    session = nextSession;
+    targetFrameId = defaultTargetFrameId(bundle);
+    postToPlugin({ type: "SAVE_SESSION", payload: { session: nextSession } });
+    if (targetFrameId) {
+      await selectTarget(targetFrameId);
     }
-
-    const normalized = normalizeAnalysisResponse(result.raw, apiBaseUrl);
-    lastResult = {
-      ...normalized,
-      completedAt: normalized.completedAt || new Date().toISOString()
-    };
-    showProgress("completed");
-    renderResult(lastResult, payload);
+    showProgress("ready");
+    renderWorkspace();
   } catch (error) {
-    showError(friendlyErrorMessage(error));
+    showError(friendlyErrorMessage(error), "server");
   } finally {
     setRunning(false);
   }
 }
 
-function renderResult(result: AnalysisResult, payload: ExportedFramePayload): void {
-  hideError();
-  elements.progressPanel.classList.add("is-hidden");
-  elements.resultPanel.classList.remove("is-hidden");
-  elements.resultFrameName.textContent = payload.frame.name;
-  elements.completedAt.textContent = result.completedAt
-    ? formatDate(result.completedAt)
-    : formatDate(new Date().toISOString());
-
-  elements.frameImage.src = createFrameImageUrl(payload.bytes);
-  elements.overlayShell.classList.remove("is-hidden");
-
-  if (result.overlayUrl) {
-    elements.overlayImage.src = result.overlayUrl;
-    elements.overlayImage.classList.remove("is-hidden");
-  } else {
-    elements.overlayImage.removeAttribute("src");
-    elements.overlayImage.classList.add("is-hidden");
+async function selectTarget(frameId: string): Promise<void> {
+  if (!session || !frameId) {
+    return;
   }
-
-  renderTextSection(elements.summarySection, elements.summaryText, result.summary);
-  renderListSection(elements.hotspotsSection, elements.hotspotsList, result.hotspots);
-  renderListSection(elements.issuesSection, elements.issuesList, result.issues);
-  renderListSection(
-    elements.recommendationsSection,
-    elements.recommendationsList,
-    result.recommendations
-  );
-
-  const hasStructuredReport =
-    Boolean(result.overlayUrl || result.summary) ||
-    result.hotspots.length > 0 ||
-    result.issues.length > 0 ||
-    result.recommendations.length > 0;
-
-  elements.rawResponse.textContent = JSON.stringify(result.raw, null, 2);
-  elements.rawResponseDetails.classList.toggle("is-hidden", hasStructuredReport);
-}
-
-function renderTextSection(
-  section: HTMLElement,
-  target: HTMLElement,
-  value: string | undefined
-): void {
-  section.classList.toggle("is-hidden", !value);
-  target.textContent = value || "";
-}
-
-function renderListSection(
-  section: HTMLElement,
-  target: HTMLUListElement,
-  items: ReportItem[]
-): void {
-  target.innerHTML = "";
-  section.classList.toggle("is-hidden", items.length === 0);
-
-  items.forEach((item) => {
-    const listItem = document.createElement("li");
-
-    if (item.title) {
-      const title = document.createElement("div");
-      title.className = "report-item-title";
-      title.textContent = item.title;
-      listItem.append(title);
+  targetFrameId = frameId;
+  if (!session.target_results[frameId]) {
+    setRunning(true);
+    showProgress("preparing_target");
+    try {
+      const targetResult = await prepareTarget(apiBaseUrl, session.analysis_bundle, frameId);
+      session = {
+        ...session,
+        target_results: { ...session.target_results, [frameId]: targetResult },
+        last_opened_at: new Date().toISOString()
+      };
+      postToPlugin({ type: "SAVE_SESSION", payload: { session } });
+    } catch (error) {
+      showError(friendlyErrorMessage(error), "server");
+    } finally {
+      setRunning(false);
     }
-
-    const description = document.createElement("div");
-    description.textContent = item.description;
-    listItem.append(description);
-
-    const metaParts = [item.location, item.score ? `score ${item.score}` : undefined].filter(
-      Boolean
-    );
-    if (metaParts.length > 0) {
-      const meta = document.createElement("div");
-      meta.className = "report-item-meta";
-      meta.textContent = metaParts.join(" · ");
-      listItem.append(meta);
-    }
-
-    target.append(listItem);
-  });
+  }
+  renderWorkspace();
 }
 
-async function copyReport(): Promise<void> {
-  if (!lastResult || !lastExport) {
+async function askQuestion(): Promise<void> {
+  if (!session || isRunning) {
+    return;
+  }
+  const question = elements.questionInput.value.trim();
+  if (!question) {
     return;
   }
 
-  const report = buildReportText(lastResult, lastExport);
-  await navigator.clipboard.writeText(report);
-  elements.copyButton.textContent = "Copied";
-  window.setTimeout(() => {
-    elements.copyButton.textContent = "Copy Report";
-  }, 1400);
+  const targetResult = currentTargetResult();
+  setRunning(true);
+  showProgress("evaluating_ux");
+  try {
+    const previousMessages = session.chat_history.flatMap((entry) => [
+      { role: "user" as const, content: entry.question },
+      { role: "assistant" as const, content: entry.answer.conclusion }
+    ]);
+    const response = await evaluateUx(apiBaseUrl, session.analysis_bundle, targetResult, question, previousMessages);
+    const chatEntry: ChatEntry = {
+      question,
+      answer: response.answer,
+      provider: response.provider,
+      model: response.model,
+      created_at: new Date().toISOString()
+    };
+    session = {
+      ...session,
+      chat_history: [...session.chat_history, chatEntry],
+      last_opened_at: new Date().toISOString()
+    };
+    elements.questionInput.value = "";
+    postToPlugin({ type: "SAVE_SESSION", payload: { session } });
+    renderWorkspace();
+  } catch (error) {
+    showError(friendlyErrorMessage(error), "server");
+  } finally {
+    setRunning(false);
+  }
 }
 
-function buildReportText(
-  result: AnalysisResult,
-  payload: ExportedFramePayload
-): string {
-  return [
-    "[Eye Tracking Heatmap Report]",
-    `Frame: ${payload.frame.name}`,
-    `Completed: ${result.completedAt ? formatDate(result.completedAt) : ""}`,
-    "",
-    `Summary: ${result.summary || "서버 응답에 요약 문장이 포함되지 않았습니다."}`,
-    "",
-    formatReportItems("Hotspots", result.hotspots),
-    formatReportItems("Issues", result.issues),
-    formatReportItems("Recommendations", result.recommendations),
-    "",
-    REPORT_NOTICE
-  ]
-    .filter(Boolean)
-    .join("\n");
+function createSession(bundle: AnalysisBundle): LocalSession {
+  return {
+    local_session_id: `uxflow_${Date.now()}`,
+    analysis_bundle: bundle,
+    target_results: {},
+    chat_history: [],
+    last_opened_at: new Date().toISOString()
+  };
 }
 
-function formatReportItems(title: string, items: ReportItem[]): string {
-  if (items.length === 0) {
-    return `${title}: 없음`;
+function renderWorkspace(): void {
+  if (!session) {
+    elements.workspacePanel.classList.add("is-hidden");
+    elements.bundleMeta.textContent = "";
+    elements.flowTree.innerHTML = "";
+    elements.flowViewer.innerHTML = "";
+    elements.metricGrid.innerHTML = "";
+    renderChat();
+    updateButtons();
+    return;
   }
 
-  return [
-    `${title}:`,
-    ...items.map((item, index) => {
-      const prefix = `${index + 1}.`;
-      const titlePart = item.title ? `${item.title}: ` : "";
-      return `${prefix} ${titlePart}${item.description}`;
-    })
-  ].join("\n");
+  elements.workspacePanel.classList.remove("is-hidden");
+  elements.progressPanel.classList.add("is-hidden");
+  elements.bundleMeta.textContent = `${session.analysis_bundle.frames.length} frames`;
+  if (!targetFrameId) {
+    targetFrameId = defaultTargetFrameId(session.analysis_bundle);
+  }
+  renderTargetSelect();
+  renderFlowTree();
+  renderFlowViewer();
+  renderMetrics();
+  renderChat();
+  updateButtons();
 }
 
-function showProgress(stage: AnalysisStage): void {
+function renderTargetSelect(): void {
+  if (!session) {
+    return;
+  }
+  elements.targetSelect.innerHTML = "";
+  session.analysis_bundle.flow_tree.ordered_frame_ids.forEach((frameId) => {
+    const frame = frameById(frameId);
+    const option = document.createElement("option");
+    option.value = frameId;
+    option.textContent = frame?.frame_name || frameId;
+    elements.targetSelect.append(option);
+  });
+  if (targetFrameId) {
+    elements.targetSelect.value = targetFrameId;
+  }
+}
+
+function renderFlowTree(): void {
+  if (!session) {
+    return;
+  }
+  elements.flowTree.innerHTML = "";
+  session.analysis_bundle.flow_tree.flows.forEach((flow) => {
+    const group = document.createElement("div");
+    group.className = "flow-node";
+    const title = document.createElement("h3");
+    title.textContent = `Flow ${flow.flow_id}`;
+    group.append(title);
+    flow.frames.forEach((node) => group.append(renderFlowNode(node)));
+    elements.flowTree.append(group);
+  });
+  session.analysis_bundle.warnings.forEach((warning) => {
+    const item = document.createElement("div");
+    item.className = "flow-node";
+    item.textContent = `${warning.code}: ${warning.message}`;
+    elements.flowTree.append(item);
+  });
+}
+
+function renderFlowNode(node: FlowFrameNode): HTMLElement {
+  const wrapper = document.createElement("div");
+  wrapper.className = node.state === null ? "flow-node" : "flow-node flow-child";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.classList.toggle("is-active", node.client_frame_id === targetFrameId);
+  button.textContent = node.frame_name;
+  button.addEventListener("click", () => {
+    void selectTarget(node.client_frame_id);
+  });
+  wrapper.append(button);
+  node.children.forEach((child) => wrapper.append(renderFlowNode(child)));
+  return wrapper;
+}
+
+function renderFlowViewer(): void {
+  if (!session) {
+    return;
+  }
+  elements.flowViewer.innerHTML = "";
+  const targetResult = currentTargetResult();
+  const path = targetResult?.path_frame_ids || pathToTarget();
+  path.forEach((frameId) => {
+    const frame = frameById(frameId);
+    if (!frame) {
+      return;
+    }
+    const card = document.createElement("article");
+    card.className = "frame-card";
+    const title = document.createElement("div");
+    title.className = "card-title";
+    title.textContent = frame.frame_name;
+    const meta = document.createElement("div");
+    meta.className = "card-meta";
+    meta.textContent = metricText(frame, targetResult);
+    const shell = document.createElement("div");
+    shell.className = "image-shell";
+    const image = document.createElement("img");
+    image.alt = frame.frame_name;
+    image.src = artifactToDataUrl(resolveArtifact(frame, targetResult)) || "";
+    shell.append(image);
+    card.append(title, meta, shell);
+    elements.flowViewer.append(card);
+  });
+}
+
+function renderMetrics(): void {
+  const frame = targetFrameId ? frameById(targetFrameId) : null;
+  elements.metricGrid.innerHTML = "";
+  if (!frame) {
+    return;
+  }
+  addMetric("Fixations", String(frame.metrics.fixation_count));
+  addMetric("Path", frame.metrics.scanpath_length.toFixed(1));
+  addMetric("Entropy", frame.metrics.attention_entropy.toFixed(2));
+  addMetric("Complexity", frame.metrics.visual_complexity.toFixed(2));
+}
+
+function renderChat(): void {
+  elements.chatHistory.innerHTML = "";
+  const entries = session?.chat_history || [];
+  elements.chatMeta.textContent = String(entries.length);
+  entries.forEach((entry) => {
+    const item = document.createElement("div");
+    item.className = "chat-item";
+    const question = document.createElement("div");
+    question.className = "chat-question";
+    question.textContent = entry.question;
+    const conclusion = document.createElement("p");
+    conclusion.textContent = entry.answer.conclusion;
+    const reasons = document.createElement("ul");
+    reasons.className = "chat-list";
+    entry.answer.reasoning_summary.forEach((reason) => {
+      const li = document.createElement("li");
+      li.textContent = reason;
+      reasons.append(li);
+    });
+    const recs = document.createElement("ul");
+    recs.className = "chat-list";
+    entry.answer.recommendations.forEach((recommendation) => {
+      const li = document.createElement("li");
+      li.textContent = recommendation;
+      recs.append(li);
+    });
+    const meta = document.createElement("div");
+    meta.className = "card-meta";
+    meta.textContent = `${entry.provider} · ${entry.model} · confidence ${entry.answer.confidence}`;
+    item.append(question, conclusion, reasons, recs, meta);
+    elements.chatHistory.append(item);
+  });
+}
+
+function resolveArtifact(frame: FrameAnalysisResult, targetResult: TargetResult | null) {
+  const memoryFrame = targetResult?.frames.find((item) => item.client_frame_id === frame.client_frame_id);
+  if (viewMode === "memory_blur") {
+    return memoryFrame?.artifacts.memory_blur || frame.artifacts.original;
+  }
+  if (viewMode === "full_overlay") {
+    return memoryFrame?.artifacts.full_overlay || frame.artifacts.heatmap_overlay || frame.artifacts.original;
+  }
+  return frame.artifacts[viewMode] || frame.artifacts.original;
+}
+
+function metricText(frame: FrameAnalysisResult, targetResult: TargetResult | null): string {
+  const memoryFrame = targetResult?.frames.find((item) => item.client_frame_id === frame.client_frame_id);
+  if (memoryFrame) {
+    return `retention ${memoryFrame.memory_metrics.estimated_retention.toFixed(2)} · distance ${memoryFrame.temporal_distance}`;
+  }
+  return `fixations ${frame.metrics.fixation_count} · path ${frame.metrics.scanpath_length.toFixed(0)}`;
+}
+
+function addMetric(label: string, value: string): void {
+  const item = document.createElement("div");
+  item.className = "metric-item";
+  const labelElement = document.createElement("div");
+  labelElement.className = "metric-label";
+  labelElement.textContent = label;
+  const valueElement = document.createElement("div");
+  valueElement.className = "metric-value";
+  valueElement.textContent = value;
+  item.append(labelElement, valueElement);
+  elements.metricGrid.append(item);
+}
+
+function currentTargetResult(): TargetResult | null {
+  return targetFrameId && session ? session.target_results[targetFrameId] || null : null;
+}
+
+function frameById(frameId: string): FrameAnalysisResult | undefined {
+  return session?.analysis_bundle.frames.find((frame) => frame.client_frame_id === frameId);
+}
+
+function pathToTarget(): string[] {
+  if (!session || !targetFrameId) {
+    return [];
+  }
+  for (const flow of session.analysis_bundle.flow_tree.flows) {
+    const index = flow.ordered_frame_ids.indexOf(targetFrameId);
+    if (index >= 0) {
+      return flow.ordered_frame_ids.slice(0, index + 1);
+    }
+  }
+  const fallbackIndex = session.analysis_bundle.flow_tree.ordered_frame_ids.indexOf(targetFrameId);
+  return fallbackIndex >= 0
+    ? session.analysis_bundle.flow_tree.ordered_frame_ids.slice(0, fallbackIndex + 1)
+    : [];
+}
+
+function defaultTargetFrameId(bundle: AnalysisBundle | null): string | null {
+  if (!bundle || bundle.flow_tree.ordered_frame_ids.length === 0) {
+    return null;
+  }
+  return bundle.flow_tree.ordered_frame_ids[bundle.flow_tree.ordered_frame_ids.length - 1];
+}
+
+function clearCurrentSession(): void {
+  session = null;
+  targetFrameId = null;
+  postToPlugin({ type: "CLEAR_CURRENT_SESSION" });
+  renderWorkspace();
+}
+
+function showProgress(stage: AppStage): void {
   elements.progressPanel.classList.remove("is-hidden");
+  elements.stagePill.textContent = stage;
   elements.stageMessage.textContent = STAGE_MESSAGES[stage];
 }
 
-function showError(message: string): void {
+function showError(message: string, source: "server" | "storage" | "plugin"): void {
   elements.progressPanel.classList.add("is-hidden");
-  elements.resultPanel.classList.add("is-hidden");
   elements.errorPanel.classList.remove("is-hidden");
-  elements.errorMessage.textContent = message;
+  elements.errorMessage.textContent = `${source}: ${message}`;
   setRunning(false);
 }
 
@@ -397,53 +544,50 @@ function hideError(): void {
   elements.errorPanel.classList.add("is-hidden");
 }
 
-function hideResult(): void {
-  elements.resultPanel.classList.add("is-hidden");
+function setRunning(value: boolean): void {
+  isRunning = value;
+  updateButtons();
 }
 
-function createFrameImageUrl(bytes: Uint8Array): string {
-  if (frameImageUrl) {
-    URL.revokeObjectURL(frameImageUrl);
+function updateButtons(): void {
+  elements.runButton.disabled = isRunning || !selectionCanAnalyze;
+  elements.retryButton.disabled = isRunning || !selectionCanAnalyze;
+  elements.askButton.disabled = isRunning || !session;
+  elements.clearButton.disabled = isRunning || !session;
+  elements.refreshButton.disabled = isRunning;
+  elements.targetSelect.disabled = isRunning || !session;
+}
+
+function appendMessage(message: string, kind?: "warning" | "error"): void {
+  const item = document.createElement("li");
+  if (kind) {
+    item.className = kind;
   }
+  item.textContent = message;
+  elements.selectionMessages.append(item);
+}
 
-  const copiedBuffer = new ArrayBuffer(bytes.byteLength);
-  new Uint8Array(copiedBuffer).set(bytes);
-  frameImageUrl = URL.createObjectURL(
-    new Blob([copiedBuffer], {
-      type: "image/png"
-    })
-  );
-
-  return frameImageUrl;
+function setActiveButton(selector: string, active: HTMLButtonElement): void {
+  document.querySelectorAll<HTMLButtonElement>(selector).forEach((button) => {
+    button.classList.toggle("is-active", button === active);
+  });
 }
 
 function bindResizeHandle(): void {
   elements.resizeHandle.addEventListener("pointerdown", (event) => {
     event.preventDefault();
     elements.resizeHandle.setPointerCapture(event.pointerId);
-
     const startX = event.clientX;
     const startY = event.clientY;
     const startWidth = window.innerWidth;
     const startHeight = window.innerHeight;
 
     const onPointerMove = (moveEvent: PointerEvent): void => {
-      const width = clamp(
-        startWidth + moveEvent.clientX - startX,
-        PLUGIN_WINDOW_LIMITS.minWidth,
-        PLUGIN_WINDOW_LIMITS.maxWidth
-      );
-      const height = clamp(
-        startHeight + moveEvent.clientY - startY,
-        PLUGIN_WINDOW_LIMITS.minHeight,
-        PLUGIN_WINDOW_LIMITS.maxHeight
-      );
-
       postToPlugin({
         type: "RESIZE_PLUGIN",
         payload: {
-          width,
-          height
+          width: clamp(startWidth + moveEvent.clientX - startX, PLUGIN_WINDOW_LIMITS.minWidth, PLUGIN_WINDOW_LIMITS.maxWidth),
+          height: clamp(startHeight + moveEvent.clientY - startY, PLUGIN_WINDOW_LIMITS.minHeight, PLUGIN_WINDOW_LIMITS.maxHeight)
         }
       });
     };
@@ -467,46 +611,12 @@ function clamp(value: number, min: number, max: number): number {
   return Math.round(Math.min(Math.max(value, min), max));
 }
 
-function setRunning(value: boolean): void {
-  isRunning = value;
-  elements.runButton.disabled = value || !selectedFrame?.canAnalyze;
-  elements.retryButton.disabled = value;
-  elements.retryFromErrorButton.disabled = value;
-  elements.refreshButton.disabled = value;
-}
-
-function appendMessage(message: string, kind?: "warning" | "error"): void {
-  const item = document.createElement("li");
-  if (kind) {
-    item.className = kind;
-  }
-  item.textContent = message;
-  elements.selectionMessages.append(item);
-}
-
 function postToPlugin(message: UiToMainMessage): void {
-  parent.postMessage(
-    {
-      pluginMessage: message
-    },
-    "*"
-  );
+  parent.postMessage({ pluginMessage: message }, "*");
 }
 
 function closePlugin(): void {
   postToPlugin({ type: "CLOSE_PLUGIN" });
-}
-
-function formatDate(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return new Intl.DateTimeFormat("ko-KR", {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(date);
 }
 
 function byId<T extends HTMLElement>(id: string): T {
@@ -514,7 +624,6 @@ function byId<T extends HTMLElement>(id: string): T {
   if (!element) {
     throw new Error(`Missing UI element: ${id}`);
   }
-
   return element as T;
 }
 

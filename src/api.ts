@@ -1,13 +1,17 @@
 import {
-  AnalysisResult,
-  AnalysisStage,
-  CreateAnalysisInput,
-  ReportItem
+  AnalysisBundle,
+  ExportedFlowPayload,
+  FrameInfo,
+  PLUGIN_VERSION,
+  TargetResult,
+  UxEvaluationResponse,
+  VisualArtifact
 } from "./types";
 
-const CREATE_ANALYSIS_PATH = "/api/v1/analyses";
-const POLL_INTERVAL_MS = 1750;
-const MAX_WAIT_MS = 60000;
+const FLOW_ANALYZE_PATH = "/api/v1/flow/analyze";
+const PREPARE_TARGET_PATH = "/api/v1/flow/prepare-target";
+const UX_CHAT_PATH = "/api/v1/ux/chat";
+const UX_HEURISTIC_CHAT_PATH = "/api/v1/ux/chat/heuristic";
 
 export class AnalysisApiError extends Error {
   status?: number;
@@ -19,241 +23,180 @@ export class AnalysisApiError extends Error {
   }
 }
 
-export async function createAnalysis(
-  input: CreateAnalysisInput
-): Promise<unknown> {
+export async function analyzeFlow(
+  apiBaseUrl: string,
+  payload: ExportedFlowPayload
+): Promise<AnalysisBundle> {
   const formData = new FormData();
-  const fileName = `${sanitizeFilePart(input.frame.id)}.png`;
-  const arrayBuffer = new ArrayBuffer(input.fileBytes.byteLength);
-  new Uint8Array(arrayBuffer).set(input.fileBytes);
-  const file = new File([arrayBuffer], fileName, {
-    type: "image/png"
+  const framesMeta = payload.frames.map((item) => frameToMeta(item.frame, payload.exportScale));
+
+  payload.frames.forEach((item) => {
+    const file = new File([copyBytes(item.bytes)], item.frame.fileKey, { type: "image/png" });
+    formData.append("files", file);
   });
 
-  formData.append("file", file);
-  formData.append("frame_id", input.frame.id);
-  formData.append("frame_name", input.frame.name);
-  formData.append("width", String(input.frame.width));
-  formData.append("height", String(input.frame.height));
-  formData.append("export_scale", String(input.exportScale));
-  formData.append("plugin_version", input.pluginVersion);
+  formData.append("frames_meta", JSON.stringify(framesMeta));
+  formData.append("model_name", "umsi++");
+  formData.append(
+    "options",
+    JSON.stringify({
+      source: "figma-plugin",
+      plugin_version: PLUGIN_VERSION,
+      requested_at: new Date().toISOString()
+    })
+  );
 
-  if (input.modelName) {
-    formData.append("model_name", input.modelName);
-  }
-
-  if (input.options) {
-    formData.append("options", JSON.stringify(input.options));
-  }
-
-  const response = await fetch(buildUrl(input.apiBaseUrl, CREATE_ANALYSIS_PATH), {
+  const response = await fetch(buildUrl(apiBaseUrl, FLOW_ANALYZE_PATH), {
     method: "POST",
     body: formData
   });
-
-  return readJsonResponse(response);
+  return (await readJsonResponse(response)) as AnalysisBundle;
 }
 
-export async function waitForAnalysis(
-  createResponse: unknown,
+export async function prepareTarget(
   apiBaseUrl: string,
-  onStatusChange: (stage: AnalysisStage) => void
-): Promise<AnalysisResult> {
-  let result = normalizeAnalysisResponse(createResponse, apiBaseUrl);
-
-  const jobId = result.jobId;
-  if (isCompleted(result) || isFailed(result) || !jobId) {
-    return result;
-  }
-
-  const startedAt = Date.now();
-  onStatusChange("queued");
-
-  while (Date.now() - startedAt < MAX_WAIT_MS) {
-    await delay(POLL_INTERVAL_MS);
-    onStatusChange("running");
-
-    const response = await fetch(
-      buildUrl(apiBaseUrl, `${CREATE_ANALYSIS_PATH}/${encodeURIComponent(jobId)}`)
-    );
-    result = normalizeAnalysisResponse(await readJsonResponse(response), apiBaseUrl);
-
-    if (isCompleted(result) || isFailed(result)) {
-      return result;
-    }
-  }
-
-  return {
-    ...result,
-    status: "timeout"
-  };
+  bundle: AnalysisBundle,
+  targetFrameId: string
+): Promise<TargetResult> {
+  const response = await fetch(buildUrl(apiBaseUrl, PREPARE_TARGET_PATH), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      target_frame_id: targetFrameId,
+      flow_tree: bundle.flow_tree,
+      frames: bundle.frames.map((frame) => ({
+        client_frame_id: frame.client_frame_id,
+        frame_name: frame.frame_name,
+        original_image: frame.artifacts.original,
+        heatmap: frame.artifacts.heatmap,
+        scanpath_metrics: frame.metrics,
+        parsed: frame.parsed
+      })),
+      options: {
+        blur_strength_base: 8,
+        temporal_decay_weight: 1,
+        scanpath_weight: 0.6
+      }
+    })
+  });
+  return (await readJsonResponse(response)) as TargetResult;
 }
 
-export function normalizeAnalysisResponse(
-  response: unknown,
-  apiBaseUrl: string
-): AnalysisResult {
-  const root = asRecord(response);
-  const data = firstRecord(
-    root?.result,
-    root?.analysis,
-    root?.data,
-    root?.report,
-    root
-  );
-  const report = firstRecord(data?.report, data);
-  const assets = firstRecord(root?.assets, data?.assets);
+export async function evaluateUx(
+  apiBaseUrl: string,
+  bundle: AnalysisBundle,
+  targetResult: TargetResult | null,
+  question: string,
+  previousMessages: { role: "user" | "assistant"; content: string }[]
+): Promise<UxEvaluationResponse> {
+  const selectedImages = buildSelectedImages(bundle, targetResult);
+  const requestBody = JSON.stringify({
+    question,
+    target_frame_id: targetResult?.target_frame_id || bundle.flow_tree.ordered_frame_ids[0],
+    flow_tree: bundle.flow_tree,
+    evidence: {
+      frames: bundle.frames.map((frame) => ({
+        client_frame_id: frame.client_frame_id,
+        frame_name: frame.frame_name,
+        parsed: frame.parsed,
+        metrics: frame.metrics
+      })),
+      target_result: targetResult,
+      selected_images: selectedImages
+    },
+    previous_messages: previousMessages
+  });
+  const response = await fetch(buildUrl(apiBaseUrl, UX_CHAT_PATH), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: requestBody
+  });
+  try {
+    return (await readJsonResponse(response)) as UxEvaluationResponse;
+  } catch (error) {
+    if (error instanceof AnalysisApiError && error.status && error.status >= 500) {
+      const fallbackResponse = await fetch(buildUrl(apiBaseUrl, UX_HEURISTIC_CHAT_PATH), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: requestBody
+      });
+      return (await readJsonResponse(fallbackResponse)) as UxEvaluationResponse;
+    }
+    throw error;
+  }
+}
 
-  const status =
-    stringValue(root?.status) ||
-    stringValue(data?.status) ||
-    stringValue(root?.state) ||
-    stringValue(data?.state) ||
-    inferStatus(data);
-
-  const jobId =
-    stringValue(root?.job_id) ||
-    stringValue(root?.jobId) ||
-    stringValue(root?.id) ||
-    stringValue(root?.analysis_id) ||
-    stringValue(data?.job_id) ||
-    stringValue(data?.jobId) ||
-    stringValue(data?.id) ||
-    stringValue(data?.analysis_id);
-
-  const overlayUrl = resolveMaybeUrl(
-    stringValue(root?.overlay_url) ||
-      stringValue(root?.overlayUrl) ||
-      stringValue(root?.heatmap_url) ||
-      stringValue(root?.heatmapUrl) ||
-      stringValue(data?.overlay_url) ||
-      stringValue(data?.overlayUrl) ||
-      stringValue(data?.heatmap_url) ||
-      stringValue(data?.heatmapUrl),
-    apiBaseUrl
-  ) || toDataImageUrl(
-    stringValue(root?.heatmap_png_base64) ||
-      stringValue(data?.heatmap_png_base64) ||
-      stringValue(assets?.heatmap_png_base64),
-    stringValue(assets?.image_mime_type)
-  );
-
-  const summary =
-    stringValue(root?.summary) ||
-    stringValue(data?.summary) ||
-    stringValue(report?.summary);
-
-  const completedAt =
-    stringValue(root?.completed_at) ||
-    stringValue(root?.completedAt) ||
-    stringValue(data?.completed_at) ||
-    stringValue(data?.completedAt) ||
-    (isTerminalStatus(status) ? new Date().toISOString() : undefined);
-
-  return {
-    status,
-    jobId,
-    overlayUrl,
-    summary,
-    hotspots: toReportItems(
-      root?.hotspots ??
-        data?.hotspots ??
-        report?.hotspots ??
-        root?.attention_hotspots ??
-        data?.attention_hotspots ??
-        report?.attention_hotspots
-    ),
-    issues: toReportItems(
-      root?.issues ??
-        data?.issues ??
-        report?.issues ??
-        root?.low_attention_areas ??
-        data?.low_attention_areas ??
-        report?.low_attention_areas
-    ),
-    recommendations: toReportItems(
-      root?.recommendations ?? data?.recommendations ?? report?.recommendations
-    ),
-    completedAt,
-    raw: response
-  };
+export function artifactToDataUrl(artifact: VisualArtifact | undefined): string | undefined {
+  if (!artifact?.base64) {
+    return undefined;
+  }
+  if (artifact.base64.startsWith("data:")) {
+    return artifact.base64;
+  }
+  return `data:${artifact.mime_type || "image/png"};base64,${artifact.base64}`;
 }
 
 export function friendlyErrorMessage(error: unknown): string {
   if (error instanceof AnalysisApiError) {
-    if (error.status === 422) {
-      return `분석 요청 형식이 올바르지 않습니다. ${error.message}`;
+    if (error.status === 413) {
+      return "이미지 용량이 너무 큽니다. Export scale을 낮추거나 프레임 수를 줄여주세요.";
     }
-
     if (error.status && error.status >= 500) {
-      return "서버에서 분석을 완료하지 못했습니다.";
+      return `서버 분석 중 오류가 발생했습니다. ${error.message}`;
     }
-
     return error.message;
   }
 
   if (error instanceof TypeError) {
-    return "분석 서버에 연결할 수 없습니다. 네트워크 상태를 확인해주세요.";
+    return "분석 서버에 연결할 수 없습니다.";
   }
 
-  return "분석 중 오류가 발생했습니다.";
+  return "요청을 완료하지 못했습니다.";
 }
 
-export function isCompleted(result: AnalysisResult): boolean {
-  return normalizeStatus(result.status) === "completed" || hasVisibleResult(result);
+function frameToMeta(frame: FrameInfo, exportScale: number): Record<string, unknown> {
+  return {
+    client_frame_id: frame.clientFrameId,
+    figma_node_id: frame.id,
+    frame_name: frame.name,
+    width: frame.width,
+    height: frame.height,
+    export_scale: exportScale,
+    file_key: frame.fileKey,
+    order_index: frame.orderIndex
+  };
 }
 
-export function isFailed(result: AnalysisResult): boolean {
-  const status = normalizeStatus(result.status);
-  return status === "failed" || status === "timeout";
-}
-
-function hasVisibleResult(result: AnalysisResult): boolean {
-  return Boolean(
-    result.overlayUrl ||
-      result.summary ||
-      result.hotspots.length > 0 ||
-      result.issues.length > 0 ||
-      result.recommendations.length > 0
-  );
-}
-
-function inferStatus(data: Record<string, unknown> | null): AnalysisStage {
-  if (!data) {
-    return "completed";
+function buildSelectedImages(bundle: AnalysisBundle, targetResult: TargetResult | null): VisualArtifact[] {
+  const artifacts: VisualArtifact[] = [];
+  const targetId = targetResult?.target_frame_id || bundle.flow_tree.ordered_frame_ids[0];
+  const targetFrame = bundle.frames.find((frame) => frame.client_frame_id === targetId);
+  if (targetFrame?.artifacts.heatmap_overlay) {
+    artifacts.push(targetFrame.artifacts.heatmap_overlay);
   }
-
-  if (
-    data.overlay_url ||
-    data.overlayUrl ||
-    data.heatmap_url ||
-    data.heatmapUrl ||
-    data.summary ||
-    data.report
-  ) {
-    return "completed";
+  if (targetResult) {
+    targetResult.frames.slice(0, 3).forEach((frame) => {
+      const fullOverlay = frame.artifacts.full_overlay;
+      if (fullOverlay) {
+        artifacts.push(fullOverlay);
+      }
+    });
   }
-
-  return "completed";
+  return artifacts.slice(0, 4);
 }
 
-function normalizeStatus(status: string): AnalysisStage | string {
-  return status.trim().toLowerCase();
-}
-
-function isTerminalStatus(status: string): boolean {
-  const normalized = normalizeStatus(status);
-  return normalized === "completed" || normalized === "failed";
+function copyBytes(bytes: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  return buffer;
 }
 
 async function readJsonResponse(response: Response): Promise<unknown> {
   const text = await response.text();
   const payload = text ? safeJsonParse(text) : null;
-
   if (!response.ok) {
     throw new AnalysisApiError(extractErrorMessage(payload), response.status);
   }
-
   return payload;
 }
 
@@ -262,21 +205,14 @@ function extractErrorMessage(payload: unknown): string {
   if (!record) {
     return "서버 응답을 해석할 수 없습니다.";
   }
-
-  if (typeof record.detail === "string") {
-    return record.detail;
+  if (typeof record.message === "string") {
+    return record.message;
   }
-
-  if (Array.isArray(record.detail)) {
-    return record.detail
-      .map((item) => {
-        const detail = asRecord(item);
-        return stringValue(detail?.msg) || JSON.stringify(item);
-      })
-      .join(" ");
+  const detail = asRecord(record.detail);
+  if (detail && typeof detail.message === "string") {
+    return detail.message;
   }
-
-  return stringValue(record.message) || JSON.stringify(payload);
+  return JSON.stringify(payload);
 }
 
 function safeJsonParse(text: string): unknown {
@@ -287,196 +223,12 @@ function safeJsonParse(text: string): unknown {
   }
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
 function buildUrl(apiBaseUrl: string, path: string): string {
   return `${apiBaseUrl.replace(/\/$/, "")}${path}`;
-}
-
-function sanitizeFilePart(value: string): string {
-  return value.replace(/[^a-zA-Z0-9_.-]/g, "_");
-}
-
-function resolveMaybeUrl(value: string | undefined, apiBaseUrl: string): string | undefined {
-  if (!value) {
-    return undefined;
-  }
-
-  try {
-    return new URL(value, apiBaseUrl).toString();
-  } catch {
-    return value;
-  }
-}
-
-function toDataImageUrl(
-  base64: string | undefined,
-  mimeType = "image/png"
-): string | undefined {
-  if (!base64) {
-    return undefined;
-  }
-
-  if (base64.startsWith("data:")) {
-    return base64;
-  }
-
-  return `data:${mimeType};base64,${base64}`;
-}
-
-function toReportItems(value: unknown): ReportItem[] {
-  if (!value) {
-    return [];
-  }
-
-  if (typeof value === "string") {
-    return value
-      .split(/\n+/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((description) => ({ description }));
-  }
-
-  if (!Array.isArray(value)) {
-    const record = asRecord(value);
-    if (!record) {
-      return [];
-    }
-
-    return Object.entries(record).map(([title, description]) => ({
-      title,
-      description: stringifyReportValue(description)
-    }));
-  }
-
-  return value.map((item) => {
-    if (typeof item === "string") {
-      return { description: item };
-    }
-
-    const record = asRecord(item);
-    if (!record) {
-      return {
-        description: stringifyReportValue(item)
-      };
-    }
-
-    return {
-      title:
-        stringValue(record.title) ||
-        stringValue(record.name) ||
-        stringValue(record.area) ||
-        stringValue(record.label) ||
-        stringValue(record.region) ||
-        undefined,
-      description:
-        stringValue(record.description) ||
-        stringValue(record.message) ||
-        stringValue(record.text) ||
-        stringValue(record.note) ||
-        describeStructuredReportItem(record),
-      score:
-        typeof record.score === "number" || typeof record.score === "string"
-          ? record.score
-          : typeof record.mean_score === "number" || typeof record.mean_score === "string"
-            ? record.mean_score
-          : undefined,
-      location:
-        stringValue(record.location) ||
-        stringValue(record.region) ||
-        bboxToString(record.bbox) ||
-        undefined
-    };
-  });
-}
-
-function describeStructuredReportItem(record: Record<string, unknown>): string {
-  const parts: string[] = [];
-  const label = stringValue(record.label) || stringValue(record.region);
-  const estimate = stringValue(record.estimate);
-  const meanScore = stringValue(record.mean_score);
-  const bbox = bboxToString(record.bbox);
-
-  if (label) {
-    parts.push(label);
-  }
-
-  if (estimate) {
-    parts.push(`estimate ${estimate}`);
-  }
-
-  if (meanScore) {
-    parts.push(`mean score ${meanScore}`);
-  }
-
-  if (bbox) {
-    parts.push(bbox);
-  }
-
-  return parts.length > 0 ? parts.join(" · ") : stringifyReportValue(record);
-}
-
-function bboxToString(value: unknown): string | undefined {
-  const bbox = asRecord(value);
-  if (!bbox) {
-    return stringValue(value);
-  }
-
-  const x = stringValue(bbox.x);
-  const y = stringValue(bbox.y);
-  const width = stringValue(bbox.width);
-  const height = stringValue(bbox.height);
-
-  if (!x || !y || !width || !height) {
-    return stringifyReportValue(value);
-  }
-
-  return `x ${x}, y ${y}, ${width}×${height}`;
-}
-
-function stringifyReportValue(value: unknown): string {
-  if (typeof value === "string") {
-    return value;
-  }
-
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-
-  return JSON.stringify(value);
-}
-
-function firstRecord(...values: unknown[]): Record<string, unknown> | null {
-  for (const value of values) {
-    const record = asRecord(value);
-    if (record) {
-      return record;
-    }
-  }
-
-  return null;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
-  }
-
-  return null;
-}
-
-function stringValue(value: unknown): string | undefined {
-  if (typeof value === "string" && value.trim()) {
-    return value;
-  }
-
-  if (typeof value === "number") {
-    return String(value);
-  }
-
-  return undefined;
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
 }
