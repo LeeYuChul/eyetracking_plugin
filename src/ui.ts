@@ -43,8 +43,13 @@ let selectionCanAnalyze = false;
 let session: LocalSession | null = null;
 let targetFrameId: string | null = null;
 let viewMode: ViewMode = "original";
+let activePage: "analysis" | "results" = "analysis";
 
 const elements = {
+  analysisTab: byId<HTMLButtonElement>("analysisTab"),
+  resultsTab: byId<HTMLButtonElement>("resultsTab"),
+  analysisPage: byId<HTMLElement>("analysisPage"),
+  resultsPage: byId<HTMLElement>("resultsPage"),
   closeButton: byId<HTMLButtonElement>("closeButton"),
   refreshButton: byId<HTMLButtonElement>("refreshButton"),
   runButton: byId<HTMLButtonElement>("runButton"),
@@ -78,6 +83,12 @@ function init(): void {
 }
 
 function bindEvents(): void {
+  elements.analysisTab.addEventListener("click", () => setActivePage("analysis"));
+  elements.resultsTab.addEventListener("click", () => {
+    if (session) {
+      setActivePage("results");
+    }
+  });
   elements.closeButton.addEventListener("click", closePlugin);
   elements.refreshButton.addEventListener("click", () => postToPlugin({ type: "REFRESH_SELECTION" }));
   elements.runButton.addEventListener("click", requestAnalysis);
@@ -126,17 +137,22 @@ function handlePluginMessage(message: MainToUiMessage): void {
   if (message.type === "STORAGE_LOADED") {
     session = message.payload.session;
     targetFrameId = defaultTargetFrameId(session?.analysis_bundle || null);
+    if (session) {
+      setActivePage("results");
+    }
     renderWorkspace();
     return;
   }
   if (message.type === "STORAGE_SAVED") {
     session = message.payload.session;
+    setActivePage("results");
     renderWorkspace();
     return;
   }
   if (message.type === "STORAGE_CLEARED") {
     session = null;
     targetFrameId = null;
+    setActivePage("analysis");
     renderWorkspace();
     return;
   }
@@ -200,6 +216,7 @@ async function runAnalysis(payload: ExportedFlowPayload): Promise<void> {
       await selectTarget(targetFrameId);
     }
     showProgress("ready");
+    setActivePage("results");
     renderWorkspace();
   } catch (error) {
     showError(friendlyErrorMessage(error), "server");
@@ -297,7 +314,7 @@ function renderWorkspace(): void {
 
   elements.workspacePanel.classList.remove("is-hidden");
   elements.progressPanel.classList.add("is-hidden");
-  elements.bundleMeta.textContent = `${session.analysis_bundle.frames.length} frames`;
+  elements.bundleMeta.textContent = `${session.analysis_bundle.frames.length} frames analyzed`;
   if (!targetFrameId) {
     targetFrameId = defaultTargetFrameId(session.analysis_bundle);
   }
@@ -333,16 +350,20 @@ function renderFlowTree(): void {
   elements.flowTree.innerHTML = "";
   session.analysis_bundle.flow_tree.flows.forEach((flow) => {
     const group = document.createElement("div");
-    group.className = "flow-node";
+    group.className = "ia-flow";
     const title = document.createElement("h3");
     title.textContent = `Flow ${flow.flow_id}`;
+    title.className = "ia-flow-title";
     group.append(title);
-    flow.frames.forEach((node) => group.append(renderFlowNode(node)));
+    const tree = document.createElement("div");
+    tree.className = "ia-tree";
+    flow.frames.forEach((node) => tree.append(renderFlowNode(node)));
+    group.append(tree);
     elements.flowTree.append(group);
   });
   session.analysis_bundle.warnings.forEach((warning) => {
     const item = document.createElement("div");
-    item.className = "flow-node";
+    item.className = "ia-warning";
     item.textContent = `${warning.code}: ${warning.message}`;
     elements.flowTree.append(item);
   });
@@ -350,17 +371,45 @@ function renderFlowTree(): void {
 
 function renderFlowNode(node: FlowFrameNode): HTMLElement {
   const wrapper = document.createElement("div");
-  wrapper.className = node.state === null ? "flow-node" : "flow-node flow-child";
+  wrapper.className = "ia-branch";
   const button = document.createElement("button");
   button.type = "button";
+  button.className = "ia-node";
   button.classList.toggle("is-active", node.client_frame_id === targetFrameId);
-  button.textContent = node.frame_name;
+
+  const name = document.createElement("span");
+  name.className = "ia-node-name";
+  name.textContent = node.frame_name;
+  const meta = document.createElement("span");
+  meta.className = "ia-node-meta";
+  meta.textContent = frameNodeMeta(node);
+  button.append(name, meta);
+
   button.addEventListener("click", () => {
     void selectTarget(node.client_frame_id);
   });
   wrapper.append(button);
-  node.children.forEach((child) => wrapper.append(renderFlowNode(child)));
+  if (node.children.length > 0) {
+    const children = document.createElement("div");
+    children.className = "ia-children";
+    node.children.forEach((child) => children.append(renderFlowNode(child)));
+    wrapper.append(children);
+  }
   return wrapper;
+}
+
+function frameNodeMeta(node: FlowFrameNode): string {
+  const parts = [];
+  if (node.screen_name) {
+    parts.push(node.screen_name);
+  }
+  if (node.depth !== null) {
+    parts.push(`D${node.depth}`);
+  }
+  if (node.state !== null) {
+    parts.push(`S${node.state}`);
+  }
+  return parts.join(" · ") || "Unparsed";
 }
 
 function renderFlowViewer(): void {
@@ -507,6 +556,7 @@ function clearCurrentSession(): void {
   session = null;
   targetFrameId = null;
   postToPlugin({ type: "CLEAR_CURRENT_SESSION" });
+  setActivePage("analysis");
   renderWorkspace();
 }
 
@@ -539,6 +589,16 @@ function updateButtons(): void {
   elements.clearButton.disabled = isRunning || !session;
   elements.refreshButton.disabled = isRunning;
   elements.targetSelect.disabled = isRunning || !session;
+  elements.resultsTab.disabled = !session;
+}
+
+function setActivePage(page: "analysis" | "results"): void {
+  activePage = page === "results" && !session ? "analysis" : page;
+  elements.analysisPage.classList.toggle("is-hidden", activePage !== "analysis");
+  elements.resultsPage.classList.toggle("is-hidden", activePage !== "results");
+  elements.analysisTab.classList.toggle("is-active", activePage === "analysis");
+  elements.resultsTab.classList.toggle("is-active", activePage === "results");
+  updateButtons();
 }
 
 function appendMessage(message: string, kind?: "warning" | "error"): void {

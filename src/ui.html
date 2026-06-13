@@ -12,29 +12,44 @@
           <p class="eyebrow">Figma Plugin</p>
           <h1>AI UX Flow Validation</h1>
         </div>
-        <button class="icon-button" id="closeButton" type="button" title="Close">×</button>
+        <div class="header-actions">
+          <button class="secondary-button danger" id="clearButton" type="button">Clear Session</button>
+          <button class="icon-button" id="closeButton" type="button" title="Close">×</button>
+        </div>
       </header>
 
-      <section class="toolbar">
-        <div class="field">
-          <span>Export</span>
-          <div class="segmented" role="group" aria-label="Export scale">
-            <button class="segment is-active" data-scale="1" type="button">1x</button>
-            <button class="segment" data-scale="2" type="button">2x</button>
-          </div>
-        </div>
-        <button class="primary-button" id="runButton" type="button" disabled>Run Analysis</button>
-        <button class="secondary-button" id="refreshButton" type="button">Refresh</button>
-        <button class="secondary-button danger" id="clearButton" type="button">Clear</button>
+      <section class="app-tabs" role="tablist" aria-label="Plugin pages">
+        <button class="tab-button is-active" id="analysisTab" type="button">Analysis</button>
+        <button class="tab-button" id="resultsTab" type="button" disabled>Results</button>
       </section>
 
-      <section class="panel" id="selectionPanel">
-        <div class="section-heading">
-          <h2>Selected Frames</h2>
-          <span class="status-pill" id="selectionStatus">idle</span>
-        </div>
-        <div class="frame-list" id="frameList"></div>
-        <ul class="message-list" id="selectionMessages"></ul>
+      <section class="screen" id="analysisPage">
+        <section class="analysis-hero">
+          <div>
+            <h2>Analyze selected frames</h2>
+            <p class="muted">Figma에서 1~15개 Frame을 선택한 뒤 UX Flow 분석을 실행합니다.</p>
+          </div>
+          <div class="analysis-actions">
+            <div class="field">
+              <span>Export</span>
+              <div class="segmented" role="group" aria-label="Export scale">
+                <button class="segment is-active" data-scale="1" type="button">1x</button>
+                <button class="segment" data-scale="2" type="button">2x</button>
+              </div>
+            </div>
+            <button class="secondary-button" id="refreshButton" type="button">Refresh</button>
+            <button class="primary-button" id="runButton" type="button" disabled>Run Analysis</button>
+          </div>
+        </section>
+
+        <section class="panel" id="selectionPanel">
+          <div class="section-heading">
+            <h2>Selected Frames</h2>
+            <span class="status-pill" id="selectionStatus">idle</span>
+          </div>
+          <div class="frame-list" id="frameList"></div>
+          <ul class="message-list" id="selectionMessages"></ul>
+        </section>
       </section>
 
       <section class="panel is-hidden" id="progressPanel" aria-live="polite">
@@ -54,45 +69,53 @@
         <p id="errorMessage">오류가 발생했습니다.</p>
       </section>
 
-      <section class="workspace is-hidden" id="workspacePanel">
-        <aside class="side-panel">
-          <div class="section-heading">
-            <h2>Flow Tree</h2>
-            <span class="muted" id="bundleMeta"></span>
+      <section class="screen results-screen is-hidden" id="resultsPage">
+        <section class="results-summary">
+          <div>
+            <h2>Flow Results</h2>
+            <p class="muted" id="bundleMeta"></p>
           </div>
-          <div class="flow-tree" id="flowTree"></div>
-          <label class="field">
-            <span>Target</span>
+          <label class="target-field">
+            <span>Target frame</span>
             <select id="targetSelect"></select>
           </label>
-          <div class="metric-grid" id="metricGrid"></div>
-        </aside>
+        </section>
 
-        <section class="main-panel">
-          <div class="viewer-header">
-            <div class="segmented view-mode" id="viewModeGroup" role="group" aria-label="View mode">
-              <button class="segment is-active" data-view="original" type="button">Original</button>
-              <button class="segment" data-view="heatmap" type="button">Heatmap</button>
-              <button class="segment" data-view="scanpath" type="button">Scanpath</button>
-              <button class="segment" data-view="memory_blur" type="button">Memory</button>
-              <button class="segment" data-view="heatmap_overlay" type="button">Heatmap Overlay</button>
-              <button class="segment" data-view="scanpath_overlay" type="button">Scanpath Overlay</button>
-              <button class="segment" data-view="full_overlay" type="button">Full Overlay</button>
+        <section class="workspace is-hidden" id="workspacePanel">
+          <aside class="side-panel flow-panel">
+            <div class="section-heading">
+              <h2>IA Flow</h2>
             </div>
-          </div>
-          <div class="flow-viewer" id="flowViewer"></div>
+            <div class="flow-tree" id="flowTree"></div>
+          </aside>
 
-          <section class="chat-panel">
+          <section class="main-panel">
+            <div class="viewer-header">
+              <div class="segmented view-mode" id="viewModeGroup" role="group" aria-label="View mode">
+                <button class="segment is-active" data-view="original" type="button">Original</button>
+                <button class="segment" data-view="heatmap" type="button">Heatmap</button>
+                <button class="segment" data-view="scanpath" type="button">Scanpath</button>
+                <button class="segment" data-view="memory_blur" type="button">Memory</button>
+                <button class="segment" data-view="heatmap_overlay" type="button">Heatmap Overlay</button>
+                <button class="segment" data-view="scanpath_overlay" type="button">Scanpath Overlay</button>
+                <button class="segment" data-view="full_overlay" type="button">Full Overlay</button>
+              </div>
+            </div>
+            <div class="metric-grid" id="metricGrid"></div>
+            <div class="flow-viewer" id="flowViewer"></div>
+          </section>
+
+          <aside class="chat-panel">
             <div class="section-heading">
               <h2>UX Chat</h2>
               <span class="muted" id="chatMeta">0</span>
             </div>
             <div class="chat-history" id="chatHistory"></div>
             <div class="chat-input-row">
-              <textarea id="questionInput" rows="2" placeholder="질문을 입력하세요"></textarea>
+              <textarea id="questionInput" rows="3" placeholder="질문을 입력하세요"></textarea>
               <button class="primary-button" id="askButton" type="button">Ask</button>
             </div>
-          </section>
+          </aside>
         </section>
       </section>
 

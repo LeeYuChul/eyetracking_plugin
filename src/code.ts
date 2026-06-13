@@ -11,8 +11,8 @@ import {
 } from "./types";
 
 figma.showUI(__html__, {
-  width: 760,
-  height: 820,
+  width: 1080,
+  height: 840,
   themeColors: true
 });
 
@@ -141,11 +141,11 @@ async function exportSelectedFrames(exportScale: ExportScale): Promise<void> {
   try {
     const exported = [];
     for (const frameInfo of selection.frames) {
-      const node = figma.getNodeById(frameInfo.id);
+      const node = await figma.getNodeByIdAsync(frameInfo.id);
       if (!node || node.type !== "FRAME") {
         throw new Error(`${frameInfo.name} Frame을 찾을 수 없습니다.`);
       }
-      const bytes = await (node as FrameNode).exportAsync({
+      const bytes = await node.exportAsync({
         format: "PNG",
         constraint: { type: "SCALE", value: exportScale }
       });
