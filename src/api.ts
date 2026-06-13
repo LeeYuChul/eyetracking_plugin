@@ -173,7 +173,7 @@ function buildSelectedImages(bundle: AnalysisBundle, targetResult: TargetResult 
     if (!artifact?.base64) {
       return;
     }
-    const key = `${frame.client_frame_id}:${artifact.artifact_type}:${role}`;
+    const key = `${frame.client_frame_id}:${artifact.artifact_type}`;
     if (pushed.has(key)) {
       return;
     }
