@@ -128,7 +128,7 @@ export interface UxEvaluationResponse {
   model: string;
 }
 
-export type UxStreamEventType = "progress" | "thinking" | "final" | "error";
+export type UxStreamEventType = "progress" | "thinking" | "thinking_delta" | "answer_delta" | "final" | "error";
 
 export interface UxStreamEvent {
   event: UxStreamEventType;

@@ -37,6 +37,10 @@ let selectedFrameId: string | null = null;
 let activePage: "analysis" | "results" = "analysis";
 let overlays = new Set<OverlayKey>();
 let liveUxEvents: UxStreamEvent[] = [];
+let liveThinkingText = "";
+let liveAnswerText = "";
+let framesPaneWidth = 220;
+let botPaneWidth = 320;
 
 const elements = {
   analysisTab: byId<HTMLButtonElement>("analysisTab"),
@@ -68,6 +72,8 @@ const elements = {
   chatMeta: byId<HTMLSpanElement>("chatMeta"),
   heatmapToggle: byId<HTMLInputElement>("heatmapToggle"),
   scanpathToggle: byId<HTMLInputElement>("scanpathToggle"),
+  leftPaneResizer: byId<HTMLDivElement>("leftPaneResizer"),
+  rightPaneResizer: byId<HTMLDivElement>("rightPaneResizer"),
   resizeHandle: byId<HTMLButtonElement>("resizeHandle")
 };
 
@@ -98,6 +104,7 @@ function bindEvents(): void {
       setActiveButton("[data-scale]", button);
     });
   });
+  bindPaneResizeHandles();
   bindResizeHandle();
 }
 
@@ -238,9 +245,17 @@ async function askQuestion(): Promise<void> {
   try {
     const history = chatHistoryForFrame(frame.client_frame_id);
     liveUxEvents = [];
+    liveThinkingText = "";
+    liveAnswerText = "";
     renderChatLive();
     const response = await evaluateFrameStream(apiBaseUrl, frame, question, history, (event) => {
-      liveUxEvents = [...liveUxEvents, event].slice(-12);
+      if (event.event === "thinking_delta") {
+        liveThinkingText += String(event.data.delta || "");
+      } else if (event.event === "answer_delta") {
+        liveAnswerText += String(event.data.delta || "");
+      } else {
+        liveUxEvents = [...liveUxEvents, event].slice(-8);
+      }
       renderChatLive();
     });
     const chatEntry: ChatEntry = {
@@ -261,6 +276,8 @@ async function askQuestion(): Promise<void> {
     };
     elements.questionInput.value = "";
     liveUxEvents = [];
+    liveThinkingText = "";
+    liveAnswerText = "";
     postToPlugin({ type: "SAVE_SESSION", payload: { session } });
     renderWorkspace();
   } catch (error) {
@@ -328,6 +345,8 @@ function renderFrameBrowser(): void {
         postToPlugin({ type: "SAVE_SESSION", payload: { session } });
       }
       liveUxEvents = [];
+      liveThinkingText = "";
+      liveAnswerText = "";
       renderWorkspace();
     });
     elements.resultFrameList.append(button);
@@ -384,33 +403,34 @@ function renderChat(): void {
   elements.chatMeta.textContent = frame ? `${entries.length}` : "0";
   renderChatLive();
   entries.forEach((entry) => {
-    const userBubble = document.createElement("div");
-    userBubble.className = "chat-bubble user";
-    userBubble.textContent = entry.question;
-
-    const assistantBubble = document.createElement("div");
-    assistantBubble.className = "chat-bubble assistant";
-    const conclusion = document.createElement("p");
-    conclusion.textContent = entry.answer.conclusion;
-    const reasons = document.createElement("ul");
-    reasons.className = "chat-list";
-    entry.answer.reasoning_summary.forEach((reason) => {
-      const li = document.createElement("li");
-      li.textContent = reason;
-      reasons.append(li);
-    });
-    const meta = document.createElement("div");
-    meta.className = "card-meta";
-    meta.textContent = `${entry.provider} · ${entry.model} · confidence ${entry.answer.confidence}`;
-    assistantBubble.append(conclusion, reasons, meta);
-    elements.chatHistory.append(userBubble, assistantBubble);
+    elements.chatHistory.append(createUserBubble(entry.question), createAssistantMessage(entry));
   });
   elements.chatHistory.scrollTop = elements.chatHistory.scrollHeight;
 }
 
 function renderChatLive(): void {
   elements.chatLive.innerHTML = "";
-  elements.chatLive.classList.toggle("is-hidden", liveUxEvents.length === 0);
+  const hasLiveText = Boolean(liveThinkingText || liveAnswerText);
+  elements.chatLive.classList.toggle("is-hidden", liveUxEvents.length === 0 && !hasLiveText);
+  if (hasLiveText) {
+    const row = document.createElement("div");
+    row.className = "bot-message-row live-response-row";
+    const bubble = document.createElement("div");
+    bubble.className = "chat-bubble assistant live-answer";
+    if (liveThinkingText) {
+      const thinking = document.createElement("div");
+      thinking.className = "thinking-text";
+      thinking.textContent = liveThinkingText;
+      bubble.append(thinking);
+    }
+    if (liveAnswerText) {
+      const answer = document.createElement("p");
+      answer.textContent = liveAnswerText;
+      bubble.append(answer);
+    }
+    row.append(createBotAvatar(), bubble);
+    elements.chatLive.append(row);
+  }
   liveUxEvents.forEach((event) => {
     const item = document.createElement("div");
     item.className = `live-item live-${event.event}`;
@@ -423,6 +443,45 @@ function renderChatLive(): void {
     item.append(label, message);
     elements.chatLive.append(item);
   });
+}
+
+function createUserBubble(text: string): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "user-message-row";
+  const bubble = document.createElement("div");
+  bubble.className = "chat-bubble user";
+  bubble.textContent = text;
+  row.append(bubble);
+  return row;
+}
+
+function createAssistantMessage(entry: ChatEntry): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "bot-message-row";
+  const assistantBubble = document.createElement("div");
+  assistantBubble.className = "chat-bubble assistant";
+  const conclusion = document.createElement("p");
+  conclusion.textContent = entry.answer.conclusion;
+  const reasons = document.createElement("ul");
+  reasons.className = "chat-list";
+  entry.answer.reasoning_summary.forEach((reason) => {
+    const li = document.createElement("li");
+    li.textContent = reason;
+    reasons.append(li);
+  });
+  const meta = document.createElement("div");
+  meta.className = "card-meta";
+  meta.textContent = `${entry.provider} · ${entry.model} · confidence ${entry.answer.confidence}`;
+  assistantBubble.append(conclusion, reasons, meta);
+  row.append(createBotAvatar(), assistantBubble);
+  return row;
+}
+
+function createBotAvatar(): HTMLElement {
+  const avatar = document.createElement("div");
+  avatar.className = "bot-avatar";
+  avatar.textContent = "U";
+  return avatar;
 }
 
 function addMetric(label: string, value: string): void {
@@ -466,6 +525,8 @@ function clearCurrentSession(): void {
   session = null;
   selectedFrameId = null;
   liveUxEvents = [];
+  liveThinkingText = "";
+  liveAnswerText = "";
   postToPlugin({ type: "CLEAR_CURRENT_SESSION" });
   setActivePage("analysis");
   renderWorkspace();
@@ -562,6 +623,53 @@ function bindResizeHandle(): void {
 
 function clamp(value: number, min: number): number {
   return Math.round(Math.max(value, min));
+}
+
+function bindPaneResizeHandles(): void {
+  bindPaneResizer(elements.leftPaneResizer, "left");
+  bindPaneResizer(elements.rightPaneResizer, "right");
+  applyPaneWidths();
+}
+
+function bindPaneResizer(handle: HTMLElement, side: "left" | "right"): void {
+  handle.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    handle.setPointerCapture(event.pointerId);
+    const startX = event.clientX;
+    const startWidth = side === "left" ? framesPaneWidth : botPaneWidth;
+
+    const onPointerMove = (moveEvent: PointerEvent): void => {
+      const delta = moveEvent.clientX - startX;
+      if (side === "left") {
+        framesPaneWidth = clampBetween(startWidth + delta, 170, 420);
+      } else {
+        botPaneWidth = clampBetween(startWidth - delta, 260, 560);
+      }
+      applyPaneWidths();
+    };
+
+    const stopResize = (upEvent: PointerEvent): void => {
+      if (handle.hasPointerCapture(upEvent.pointerId)) {
+        handle.releasePointerCapture(upEvent.pointerId);
+      }
+      handle.removeEventListener("pointermove", onPointerMove);
+      handle.removeEventListener("pointerup", stopResize);
+      handle.removeEventListener("pointercancel", stopResize);
+    };
+
+    handle.addEventListener("pointermove", onPointerMove);
+    handle.addEventListener("pointerup", stopResize);
+    handle.addEventListener("pointercancel", stopResize);
+  });
+}
+
+function applyPaneWidths(): void {
+  elements.workspacePanel.style.setProperty("--frames-pane-width", `${framesPaneWidth}px`);
+  elements.workspacePanel.style.setProperty("--bot-pane-width", `${botPaneWidth}px`);
+}
+
+function clampBetween(value: number, min: number, max: number): number {
+  return Math.round(Math.min(max, Math.max(min, value)));
 }
 
 function postToPlugin(message: UiToMainMessage): void {

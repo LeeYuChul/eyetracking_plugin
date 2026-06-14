@@ -211,7 +211,14 @@ function parseSseEvent(chunk: string): UxStreamEvent | null {
   lines.forEach((line) => {
     if (line.startsWith("event:")) {
       const value = line.slice(6).trim();
-      if (value === "progress" || value === "thinking" || value === "final" || value === "error") {
+      if (
+        value === "progress" ||
+        value === "thinking" ||
+        value === "thinking_delta" ||
+        value === "answer_delta" ||
+        value === "final" ||
+        value === "error"
+      ) {
         event = value;
       }
     }
