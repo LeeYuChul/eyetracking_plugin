@@ -26,20 +26,10 @@ export type AppStage =
   | "analyzing"
   | "saving_local"
   | "ready"
-  | "preparing_target"
   | "evaluating_ux"
   | "error";
 
-export type ViewMode =
-  | "original"
-  | "heatmap"
-  | "scanpath"
-  | "memory_blur"
-  | "heatmap_overlay"
-  | "scanpath_overlay"
-  | "full_overlay";
-
-export type ChatEndpointMode = "vlm" | "heuristic";
+export type OverlayKey = "heatmap" | "scanpath";
 
 export interface FrameInfo {
   id: string;
@@ -70,44 +60,6 @@ export interface ExportedFlowPayload {
   exportScale: ExportScale;
 }
 
-export interface WarningItem {
-  code: string;
-  message: string;
-  client_frame_ids: string[];
-}
-
-export interface ParsedFrame {
-  client_frame_id: string;
-  frame_name: string;
-  flow_id: string | null;
-  depth: number | null;
-  state: number | null;
-  screen_name: string | null;
-  parse_status: "parsed" | "unparsed";
-  order_index: number;
-}
-
-export interface FlowFrameNode {
-  client_frame_id: string;
-  frame_name: string;
-  depth: number | null;
-  state: number | null;
-  screen_name: string | null;
-  children: FlowFrameNode[];
-}
-
-export interface FlowGroup {
-  flow_id: string;
-  frames: FlowFrameNode[];
-  ordered_frame_ids: string[];
-}
-
-export interface FlowTree {
-  flows: FlowGroup[];
-  unparsed_frame_ids: string[];
-  ordered_frame_ids: string[];
-}
-
 export interface VisualArtifact {
   artifact_type: string;
   mime_type: string;
@@ -115,6 +67,9 @@ export interface VisualArtifact {
   width: number;
   height: number;
   encoding: "base64" | "data_url";
+  frame_id?: string;
+  frame_name?: string;
+  image_role?: string;
 }
 
 export interface FixationPoint {
@@ -136,7 +91,6 @@ export interface FrameAnalysisResult {
   client_frame_id: string;
   figma_node_id?: string;
   frame_name: string;
-  parsed: ParsedFrame;
   width: number;
   height: number;
   order_index: number;
@@ -144,13 +98,11 @@ export interface FrameAnalysisResult {
   artifacts: Record<string, VisualArtifact>;
 }
 
-export interface AnalysisBundle {
+export interface FrameAnalysisBundle {
   analysis_bundle_id: string;
   created_at: string;
   storage_policy: string;
-  flow_tree: FlowTree;
   frames: FrameAnalysisResult[];
-  warnings: WarningItem[];
   model_info: {
     heatmap_model: string;
     heatmap_version: string;
@@ -159,32 +111,10 @@ export interface AnalysisBundle {
   };
 }
 
-export interface TargetFrameResult {
-  client_frame_id: string;
-  temporal_distance: number;
-  memory_metrics: {
-    estimated_retention: number;
-    blur_strength_avg: number;
-    temporal_distance: number;
-    depth_blur_strength?: number | null;
-    cumulative_blur_strength?: number | null;
-  };
-  artifacts: Record<string, VisualArtifact>;
-}
-
-export interface TargetResult {
-  target_result_id: string;
-  target_frame_id: string;
-  path_frame_ids: string[];
-  frames: TargetFrameResult[];
-  memory_model_options: Record<string, unknown>;
-  created_at: string;
-}
-
 export interface UxAnswer {
   conclusion: string;
   reasoning_summary: string[];
-  evidence_frames: string[];
+  evidence_images: string[];
   risk_level: "low" | "medium" | "high";
   recommendations: string[];
   confidence: "low" | "medium" | "high";
@@ -215,9 +145,9 @@ export interface ChatEntry {
 
 export interface LocalSession {
   local_session_id: string;
-  analysis_bundle: AnalysisBundle;
-  target_results: Record<string, TargetResult>;
-  chat_history: ChatEntry[];
+  analysis_bundle: FrameAnalysisBundle;
+  selected_frame_id: string | null;
+  chat_history_by_frame: Record<string, ChatEntry[]>;
   last_opened_at: string;
 }
 

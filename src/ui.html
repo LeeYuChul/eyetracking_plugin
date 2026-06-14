@@ -3,14 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AI UX Flow Validation</title>
+    <title>Eye Tracking Frame Chat</title>
   </head>
   <body>
     <main class="app">
       <header class="app-header">
         <div>
           <p class="eyebrow">Figma Plugin</p>
-          <h1>AI UX Flow Validation</h1>
+          <h1>Eye Tracking Frame Chat</h1>
         </div>
         <div class="header-actions">
           <button class="secondary-button danger" id="clearButton" type="button">Clear Session</button>
@@ -27,7 +27,7 @@
         <section class="analysis-hero">
           <div>
             <h2>Analyze selected frames</h2>
-            <p class="muted">Figma에서 1~15개 Frame을 선택한 뒤 UX Flow 분석을 실행합니다.</p>
+            <p class="muted">Figma에서 1~15개 Frame을 선택한 뒤 Heatmap과 Scanpath를 생성합니다.</p>
           </div>
           <div class="analysis-actions">
             <div class="field">
@@ -72,51 +72,35 @@
       <section class="screen results-screen is-hidden" id="resultsPage">
         <section class="results-summary">
           <div>
-            <h2>Flow Results</h2>
+            <h2>Frame Results</h2>
             <p class="muted" id="bundleMeta"></p>
           </div>
-          <label class="target-field">
-            <span>Target frame</span>
-            <select id="targetSelect"></select>
-          </label>
         </section>
 
         <section class="workspace is-hidden" id="workspacePanel">
-          <aside class="side-panel flow-panel">
+          <aside class="side-panel frame-browser">
             <div class="section-heading">
-              <h2>IA Flow</h2>
+              <h2>Frames</h2>
             </div>
-            <div class="flow-tree" id="flowTree"></div>
+            <div class="result-frame-list" id="resultFrameList"></div>
           </aside>
 
           <section class="main-panel">
             <div class="viewer-header">
-              <div class="segmented view-mode" id="viewModeGroup" role="group" aria-label="View mode">
-                <button class="segment is-active" data-view="original" type="button">Original</button>
-                <button class="segment" data-view="heatmap" type="button">Heatmap</button>
-                <button class="segment" data-view="scanpath" type="button">Scanpath</button>
-                <button class="segment" data-view="memory_blur" type="button">Memory</button>
-                <button class="segment" data-view="heatmap_overlay" type="button">Heatmap Overlay</button>
-                <button class="segment" data-view="scanpath_overlay" type="button">Scanpath Overlay</button>
-                <button class="segment" data-view="full_overlay" type="button">Full Overlay</button>
+              <div class="overlay-controls" role="group" aria-label="Overlay controls">
+                <label><input id="heatmapToggle" type="checkbox" /> Heatmap</label>
+                <label><input id="scanpathToggle" type="checkbox" /> Scanpath</label>
               </div>
             </div>
             <div class="metric-grid" id="metricGrid"></div>
-            <div class="flow-viewer" id="flowViewer"></div>
+            <div class="frame-viewer" id="frameViewer"></div>
           </section>
 
           <aside class="chat-panel">
             <div class="section-heading">
-              <h2>UX Chat</h2>
+              <h2>Frame Chat</h2>
               <span class="muted" id="chatMeta">0</span>
             </div>
-            <label class="field">
-              <span>Chat endpoint</span>
-              <select id="chatEndpointSelect">
-                <option value="vlm">/api/v1/ux/chat · VLM image chat</option>
-                <option value="heuristic">/api/v1/ux/chat/heuristic · Metric heuristic</option>
-              </select>
-            </label>
             <div class="chat-live is-hidden" id="chatLive" aria-live="polite"></div>
             <div class="chat-history" id="chatHistory"></div>
             <div class="chat-input-row">
