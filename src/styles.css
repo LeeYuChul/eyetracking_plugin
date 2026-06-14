@@ -566,16 +566,17 @@ textarea {
 
 .chat-panel {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   min-height: 0;
   max-height: 100%;
   overflow: hidden;
   background: linear-gradient(180deg, var(--bg), var(--bg-secondary));
 }
 
-.chat-history {
+.chat-scroll {
   display: grid;
-  align-content: end;
+  align-content: start;
+  gap: 10px;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -585,14 +586,19 @@ textarea {
   padding: 12px;
 }
 
+.chat-history {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 0;
+}
+
 .chat-live {
   display: grid;
-  max-height: 260px;
   gap: 8px;
-  overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--bg);
+  background: var(--bg-secondary);
   padding: 10px;
 }
 

@@ -67,6 +67,7 @@ const elements = {
   frameViewer: byId<HTMLDivElement>("frameViewer"),
   metricGrid: byId<HTMLDivElement>("metricGrid"),
   bundleMeta: byId<HTMLSpanElement>("bundleMeta"),
+  chatScroll: byId<HTMLDivElement>("chatScroll"),
   chatHistory: byId<HTMLDivElement>("chatHistory"),
   chatLive: byId<HTMLDivElement>("chatLive"),
   chatMeta: byId<HTMLSpanElement>("chatMeta"),
@@ -405,7 +406,7 @@ function renderChat(): void {
   entries.forEach((entry) => {
     elements.chatHistory.append(createUserBubble(entry.question), createAssistantMessage(entry));
   });
-  elements.chatHistory.scrollTop = elements.chatHistory.scrollHeight;
+  scrollChatToBottom();
 }
 
 function renderChatLive(): void {
@@ -443,6 +444,13 @@ function renderChatLive(): void {
     message.textContent = typeof event.data.message === "string" ? event.data.message : "진행 중입니다.";
     item.append(label, message);
     elements.chatLive.append(item);
+  });
+  scrollChatToBottom();
+}
+
+function scrollChatToBottom(): void {
+  requestAnimationFrame(() => {
+    elements.chatScroll.scrollTop = elements.chatScroll.scrollHeight;
   });
 }
 

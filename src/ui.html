@@ -105,8 +105,10 @@
               <h2>UX Bot</h2>
               <span class="muted" id="chatMeta">0</span>
             </div>
-            <div class="chat-live is-hidden" id="chatLive" aria-live="polite"></div>
-            <div class="chat-history" id="chatHistory"></div>
+            <div class="chat-scroll" id="chatScroll">
+              <div class="chat-live is-hidden" id="chatLive" aria-live="polite"></div>
+              <div class="chat-history" id="chatHistory"></div>
+            </div>
             <div class="chat-input-row">
               <textarea id="questionInput" rows="3" placeholder="질문을 입력하세요"></textarea>
               <button class="primary-button" id="askButton" type="button">Ask</button>
