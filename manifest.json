@@ -1,5 +1,5 @@
 {
-  "name": "AI UX Flow Validation",
+  "name": "Eye Tracking Frame Chat",
   "id": "figma-eyetrack-heatmap",
   "api": "1.0.0",
   "main": "dist/code.js",
@@ -8,6 +8,6 @@
   "documentAccess": "dynamic-page",
   "networkAccess": {
     "allowedDomains": ["https://eyetrack.newlearn.ai.kr"],
-    "reasoning": "The plugin sends selected Figma frame images to the stateless analysis server to generate UX flow heatmaps, scanpaths, memory blur artifacts, and UX evaluations."
+    "reasoning": "The plugin sends selected Figma frame images to the stateless analysis server to generate eye-tracking heatmaps, scanpaths, and frame-level VLM chat answers."
   }
 }
