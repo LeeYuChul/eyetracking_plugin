@@ -19,6 +19,12 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
 body {
   margin: 0;
   min-width: 520px;
@@ -45,9 +51,11 @@ button:disabled {
 
 .app {
   display: flex;
-  min-height: 100vh;
+  height: 100vh;
+  min-height: 0;
   flex-direction: column;
   gap: 12px;
+  overflow: hidden;
   padding: 14px;
 }
 
@@ -143,9 +151,11 @@ h3 {
 
 .screen {
   display: flex;
+  flex: 1;
   min-height: 0;
   flex-direction: column;
   gap: 12px;
+  overflow: hidden;
 }
 
 .analysis-hero,
@@ -177,6 +187,7 @@ h3 {
   flex: 1;
   grid-template-columns: var(--frames-pane-width, 220px) 6px minmax(320px, 1fr) 6px var(--bot-pane-width, 320px);
   gap: 8px;
+  overflow: hidden;
 }
 
 .pane-resizer {
@@ -194,6 +205,8 @@ h3 {
 
 .results-screen {
   flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .results-summary {
@@ -555,13 +568,17 @@ textarea {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
   background: linear-gradient(180deg, var(--bg), var(--bg-secondary));
 }
 
 .chat-history {
+  display: grid;
   align-content: end;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg);
@@ -632,6 +649,7 @@ textarea {
 .chat-input-row textarea {
   flex: 1;
   min-width: 0;
+  max-height: 120px;
 }
 
 .bot-message-row,
