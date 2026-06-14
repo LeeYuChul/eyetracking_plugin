@@ -420,12 +420,13 @@ function renderChatLive(): void {
     if (liveThinkingText) {
       const thinking = document.createElement("div");
       thinking.className = "thinking-text";
-      thinking.textContent = liveThinkingText;
+      renderRichText(thinking, liveThinkingText);
       bubble.append(thinking);
     }
     if (liveAnswerText) {
-      const answer = document.createElement("p");
-      answer.textContent = liveAnswerText;
+      const answer = document.createElement("div");
+      answer.className = "rich-answer";
+      renderRichText(answer, liveAnswerText);
       bubble.append(answer);
     }
     row.append(createBotAvatar(), bubble);
@@ -460,8 +461,9 @@ function createAssistantMessage(entry: ChatEntry): HTMLElement {
   row.className = "bot-message-row";
   const assistantBubble = document.createElement("div");
   assistantBubble.className = "chat-bubble assistant";
-  const conclusion = document.createElement("p");
-  conclusion.textContent = entry.answer.conclusion;
+  const conclusion = document.createElement("div");
+  conclusion.className = "rich-answer";
+  renderRichText(conclusion, entry.answer.conclusion);
   const reasons = document.createElement("ul");
   reasons.className = "chat-list";
   entry.answer.reasoning_summary.forEach((reason) => {
@@ -482,6 +484,122 @@ function createBotAvatar(): HTMLElement {
   avatar.className = "bot-avatar";
   avatar.textContent = "U";
   return avatar;
+}
+
+function renderRichText(target: HTMLElement, source: string): void {
+  target.innerHTML = markdownToHtml(source);
+}
+
+function markdownToHtml(source: string): string {
+  const normalized = source.replace(/\r\n/g, "\n").trim();
+  if (!normalized) {
+    return "";
+  }
+  const lines = normalized.split("\n");
+  const html: string[] = [];
+  let paragraph: string[] = [];
+  let unordered: string[] = [];
+  let ordered: string[] = [];
+
+  const flushParagraph = (): void => {
+    if (paragraph.length === 0) {
+      return;
+    }
+    html.push(`<p>${renderInline(paragraph.join(" "))}</p>`);
+    paragraph = [];
+  };
+  const flushUnordered = (): void => {
+    if (unordered.length === 0) {
+      return;
+    }
+    html.push(`<ul>${unordered.map((item) => `<li>${renderInline(item)}</li>`).join("")}</ul>`);
+    unordered = [];
+  };
+  const flushOrdered = (): void => {
+    if (ordered.length === 0) {
+      return;
+    }
+    html.push(`<ol>${ordered.map((item) => `<li>${renderInline(item)}</li>`).join("")}</ol>`);
+    ordered = [];
+  };
+  const flushLists = (): void => {
+    flushUnordered();
+    flushOrdered();
+  };
+  const flushAll = (): void => {
+    flushParagraph();
+    flushLists();
+  };
+
+  lines.forEach((rawLine) => {
+    const line = rawLine.trim();
+    if (!line) {
+      flushAll();
+      return;
+    }
+    const heading = /^(#{1,3})\s+(.+)$/.exec(line);
+    if (heading) {
+      flushAll();
+      const level = heading[1].length + 2;
+      html.push(`<h${level}>${renderInline(heading[2])}</h${level}>`);
+      return;
+    }
+    const unorderedItem = /^[-*+]\s+(.+)$/.exec(line);
+    if (unorderedItem) {
+      flushParagraph();
+      flushOrdered();
+      unordered.push(unorderedItem[1]);
+      return;
+    }
+    const orderedItem = /^\d+[.)]\s+(.+)$/.exec(line);
+    if (orderedItem) {
+      flushParagraph();
+      flushUnordered();
+      ordered.push(orderedItem[1]);
+      return;
+    }
+    if (/^\$\$.*\$\$$/.test(line)) {
+      flushAll();
+      html.push(`<div class="math-display">${escapeHtml(line.slice(2, -2).trim())}</div>`);
+      return;
+    }
+    flushLists();
+    paragraph.push(line);
+  });
+  flushAll();
+  return `<div class="rich-text">${html.join("")}</div>`;
+}
+
+function renderInline(source: string): string {
+  const mathTokens: string[] = [];
+  const withMath = source
+    .replace(/\\\((.+?)\\\)/g, (_match, math: string) => stashMath(mathTokens, math))
+    .replace(/\$([^$\n]+?)\$/g, (_match, math: string) => stashMath(mathTokens, math));
+  let html = escapeHtml(withMath);
+  html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+  html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  html = html.replace(/__([^_]+)__/g, "<strong>$1</strong>");
+  html = html.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+  html = html.replace(/_([^_]+)_/g, "<em>$1</em>");
+  mathTokens.forEach((math, index) => {
+    html = html.replace(`@@MATH_${index}@@`, `<span class="math-inline">${escapeHtml(math)}</span>`);
+  });
+  return html;
+}
+
+function stashMath(tokens: string[], value: string): string {
+  const token = `@@MATH_${tokens.length}@@`;
+  tokens.push(value.trim());
+  return token;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function addMetric(label: string, value: string): void {

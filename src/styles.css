@@ -684,9 +684,80 @@ textarea {
   font-weight: 650;
 }
 
-.chat-bubble.assistant p,
 .chat-bubble.user {
   white-space: pre-wrap;
+}
+
+.rich-text {
+  display: grid;
+  gap: 8px;
+}
+
+.rich-text p,
+.rich-text ul,
+.rich-text ol,
+.rich-text h3,
+.rich-text h4,
+.rich-text h5 {
+  margin: 0;
+}
+
+.rich-text h3,
+.rich-text h4,
+.rich-text h5 {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 850;
+  line-height: 1.35;
+}
+
+.rich-text ul,
+.rich-text ol {
+  display: grid;
+  gap: 6px;
+  padding-left: 18px;
+}
+
+.rich-text li {
+  padding-left: 2px;
+}
+
+.rich-text strong {
+  font-weight: 850;
+}
+
+.rich-text em {
+  font-style: italic;
+}
+
+.rich-text code {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  padding: 1px 4px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.92em;
+}
+
+.math-inline,
+.math-display {
+  font-family: "STIX Two Math", "Cambria Math", Georgia, serif;
+  font-style: italic;
+}
+
+.math-inline {
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg-secondary), var(--accent) 8%);
+  padding: 0 4px;
+}
+
+.math-display {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  padding: 8px 10px;
+  text-align: center;
 }
 
 .thinking-text {
@@ -695,7 +766,6 @@ textarea {
   padding-bottom: 8px;
   color: var(--text);
   opacity: 0.5;
-  white-space: pre-wrap;
 }
 
 .live-response-row {
