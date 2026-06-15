@@ -14,7 +14,8 @@ import {
   PLUGIN_WINDOW_LIMITS,
   SelectionInfo,
   UiToMainMessage,
-  UxStreamEvent
+  UxStreamEvent,
+  VisualArtifact
 } from "./types";
 
 const STAGE_MESSAGES: Record<AppStage, string> = {
@@ -41,6 +42,8 @@ let liveThinkingText = "";
 let liveAnswerText = "";
 let framesPaneWidth = 220;
 let botPaneWidth = 320;
+let contextMenuFrameId: string | null = null;
+let contextMenuOverlays = new Set<OverlayKey>();
 
 const elements = {
   analysisTab: byId<HTMLButtonElement>("analysisTab"),
@@ -73,6 +76,8 @@ const elements = {
   chatMeta: byId<HTMLSpanElement>("chatMeta"),
   heatmapToggle: byId<HTMLInputElement>("heatmapToggle"),
   scanpathToggle: byId<HTMLInputElement>("scanpathToggle"),
+  frameContextMenu: byId<HTMLDivElement>("frameContextMenu"),
+  copyFrameImageButton: byId<HTMLButtonElement>("copyFrameImageButton"),
   leftPaneResizer: byId<HTMLDivElement>("leftPaneResizer"),
   rightPaneResizer: byId<HTMLDivElement>("rightPaneResizer"),
   resizeHandle: byId<HTMLButtonElement>("resizeHandle")
@@ -97,6 +102,13 @@ function bindEvents(): void {
   elements.retryButton.addEventListener("click", requestAnalysis);
   elements.clearButton.addEventListener("click", clearCurrentSession);
   elements.askButton.addEventListener("click", askQuestion);
+  elements.copyFrameImageButton.addEventListener("click", copyContextFrameImage);
+  document.addEventListener("click", hideFrameContextMenu);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      hideFrameContextMenu();
+    }
+  });
   elements.heatmapToggle.addEventListener("change", () => toggleOverlay("heatmap", elements.heatmapToggle.checked));
   elements.scanpathToggle.addEventListener("change", () => toggleOverlay("scanpath", elements.scanpathToggle.checked));
   document.querySelectorAll<HTMLButtonElement>("[data-scale]").forEach((button) => {
@@ -362,6 +374,10 @@ function renderFrameViewer(): void {
   }
   const shell = document.createElement("div");
   shell.className = "composite-shell";
+  shell.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    showFrameContextMenu(event, frame);
+  });
   const original = document.createElement("img");
   original.alt = `${frame.frame_name} original`;
   original.src = artifactToDataUrl(frame.artifacts.original) || "";
@@ -383,6 +399,103 @@ function renderFrameViewer(): void {
     shell.append(scanpath);
   }
   elements.frameViewer.append(shell);
+}
+
+function showFrameContextMenu(event: MouseEvent, frame: FrameAnalysisResult): void {
+  contextMenuFrameId = frame.client_frame_id;
+  contextMenuOverlays = new Set(overlays);
+  const menu = elements.frameContextMenu;
+  menu.classList.remove("is-hidden");
+  const menuWidth = menu.offsetWidth || 150;
+  const menuHeight = menu.offsetHeight || 40;
+  const left = Math.min(event.clientX, window.innerWidth - menuWidth - 8);
+  const top = Math.min(event.clientY, window.innerHeight - menuHeight - 8);
+  menu.style.left = `${Math.max(8, left)}px`;
+  menu.style.top = `${Math.max(8, top)}px`;
+}
+
+function hideFrameContextMenu(): void {
+  elements.frameContextMenu.classList.add("is-hidden");
+}
+
+async function copyContextFrameImage(event?: MouseEvent): Promise<void> {
+  event?.stopPropagation();
+  const frame = frameById(contextMenuFrameId) || currentFrame();
+  const selectedOverlays = new Set(contextMenuOverlays);
+  hideFrameContextMenu();
+  if (!frame) {
+    showError("복사할 프레임을 찾을 수 없습니다.", "plugin");
+    return;
+  }
+  try {
+    const blob = await renderCompositeBlob(frame, selectedOverlays);
+    const ClipboardItemCtor = window.ClipboardItem;
+    if (!navigator.clipboard?.write || !ClipboardItemCtor) {
+      throw new Error("이미지 클립보드를 지원하지 않는 환경입니다.");
+    }
+    await navigator.clipboard.write([new ClipboardItemCtor({ "image/png": blob })]);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "이미지를 클립보드에 복사하지 못했습니다.";
+    showError(message, "plugin");
+  }
+}
+
+async function renderCompositeBlob(frame: FrameAnalysisResult, selectedOverlays: Set<OverlayKey>): Promise<Blob> {
+  const original = frame.artifacts.original;
+  const width = original?.width || frame.width;
+  const height = original?.height || frame.height;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(width));
+  canvas.height = Math.max(1, Math.round(height));
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("이미지 복사용 캔버스를 만들 수 없습니다.");
+  }
+  await drawArtifact(context, original, canvas.width, canvas.height, 1, "source-over");
+  if (selectedOverlays.has("heatmap")) {
+    await drawArtifact(context, frame.artifacts.heatmap_overlay, canvas.width, canvas.height, 0.88, "multiply");
+  }
+  if (selectedOverlays.has("scanpath")) {
+    await drawArtifact(context, frame.artifacts.scanpath_overlay, canvas.width, canvas.height, 0.88, "multiply");
+  }
+  const blob = await canvasToBlob(canvas);
+  if (!blob) {
+    throw new Error("이미지 복사 데이터를 생성하지 못했습니다.");
+  }
+  return blob;
+}
+
+async function drawArtifact(
+  context: CanvasRenderingContext2D,
+  artifact: VisualArtifact | undefined,
+  width: number,
+  height: number,
+  alpha: number,
+  operation: GlobalCompositeOperation
+): Promise<void> {
+  const dataUrl = artifactToDataUrl(artifact);
+  if (!dataUrl) {
+    return;
+  }
+  const image = await loadImage(dataUrl);
+  context.save();
+  context.globalAlpha = alpha;
+  context.globalCompositeOperation = operation;
+  context.drawImage(image, 0, 0, width, height);
+  context.restore();
+}
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("복사할 이미지를 불러오지 못했습니다."));
+    image.src = src;
+  });
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob | null> {
+  return new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
 }
 
 function renderMetrics(): void {
@@ -637,6 +750,13 @@ function currentFrame(): FrameAnalysisResult | null {
     return null;
   }
   return session.analysis_bundle.frames.find((frame) => frame.client_frame_id === selectedFrameId) || null;
+}
+
+function frameById(frameId: string | null): FrameAnalysisResult | null {
+  if (!session || !frameId) {
+    return null;
+  }
+  return session.analysis_bundle.frames.find((frame) => frame.client_frame_id === frameId) || null;
 }
 
 function chatHistoryForFrame(frameId: string): ChatEntry[] {

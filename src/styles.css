@@ -929,3 +929,29 @@ textarea {
   opacity: 0.88;
   mix-blend-mode: multiply;
 }
+
+.context-menu {
+  position: fixed;
+  z-index: 50;
+  min-width: 150px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  box-shadow: 0 12px 28px rgb(0 0 0 / 22%);
+  padding: 4px;
+}
+
+.context-menu button {
+  width: 100%;
+  min-height: 32px;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  padding: 0 10px;
+  text-align: left;
+  font-weight: 700;
+}
+
+.context-menu button:hover {
+  background: var(--bg-secondary);
+}
