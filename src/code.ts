@@ -204,6 +204,10 @@ figma.ui.onmessage = (message: UiToMainMessage) => {
     resizePlugin(message.payload.width, message.payload.height);
     return;
   }
+  if (message.type === "NOTIFY") {
+    figma.notify(message.payload.message, { timeout: message.payload.timeout || 2200 });
+    return;
+  }
   if (message.type === "CLOSE_PLUGIN") {
     figma.closePlugin();
   }

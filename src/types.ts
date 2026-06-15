@@ -169,4 +169,5 @@ export type UiToMainMessage =
   | { type: "CLEAR_CURRENT_SESSION" }
   | { type: "CLEAR_ALL_SESSIONS" }
   | { type: "RESIZE_PLUGIN"; payload: { width: number; height: number } }
+  | { type: "NOTIFY"; payload: { message: string; timeout?: number } }
   | { type: "CLOSE_PLUGIN" };

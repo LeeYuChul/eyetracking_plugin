@@ -429,15 +429,86 @@ async function copyContextFrameImage(event?: MouseEvent): Promise<void> {
   }
   try {
     const blob = await renderCompositeBlob(frame, selectedOverlays);
-    const ClipboardItemCtor = window.ClipboardItem;
-    if (!navigator.clipboard?.write || !ClipboardItemCtor) {
-      throw new Error("이미지 클립보드를 지원하지 않는 환경입니다.");
+    if (await copyBlobToClipboard(blob)) {
+      notifyPlugin("이미지를 클립보드에 복사했습니다.");
+      return;
     }
-    await navigator.clipboard.write([new ClipboardItemCtor({ "image/png": blob })]);
+    const dataUrl = await blobToDataUrl(blob);
+    if (await copyTextToClipboard(dataUrl)) {
+      notifyPlugin("이 환경에서는 이미지 직접 복사가 제한되어 이미지 데이터 URL을 복사했습니다.");
+      return;
+    }
+    downloadBlob(blob, `${frame.frame_name || "frame"}_view.png`);
+    notifyPlugin("클립보드가 제한되어 PNG 파일로 내려받았습니다.", 3500);
   } catch (error) {
     const message = error instanceof Error ? error.message : "이미지를 클립보드에 복사하지 못했습니다.";
     showError(message, "plugin");
   }
+}
+
+async function copyBlobToClipboard(blob: Blob): Promise<boolean> {
+  const ClipboardItemCtor = window.ClipboardItem;
+  if (!navigator.clipboard?.write || !ClipboardItemCtor) {
+    return false;
+  }
+  try {
+    await navigator.clipboard.write([new ClipboardItemCtor({ "image/png": blob })]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Fall through to execCommand for Figma plugin iframe variants.
+    }
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  document.body.append(textarea);
+  textarea.focus();
+  textarea.select();
+  try {
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    textarea.remove();
+  }
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("이미지 데이터를 텍스트로 변환하지 못했습니다."));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function downloadBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = sanitizeFileName(fileName);
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function sanitizeFileName(value: string): string {
+  const cleaned = value.replace(/[\\/:*?"<>|]+/g, "_").trim();
+  return cleaned || "frame_view.png";
 }
 
 async function renderCompositeBlob(frame: FrameAnalysisResult, selectedOverlays: Set<OverlayKey>): Promise<Blob> {
@@ -920,6 +991,10 @@ function clampBetween(value: number, min: number, max: number): number {
 
 function postToPlugin(message: UiToMainMessage): void {
   parent.postMessage({ pluginMessage: message }, "*");
+}
+
+function notifyPlugin(message: string, timeout?: number): void {
+  postToPlugin({ type: "NOTIFY", payload: { message, timeout } });
 }
 
 function closePlugin(): void {
