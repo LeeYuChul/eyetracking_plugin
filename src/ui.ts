@@ -765,7 +765,7 @@ function createAssistantMessage(entry: ChatEntry): HTMLElement {
   });
   const meta = document.createElement("div");
   meta.className = "card-meta";
-  meta.textContent = `${entry.provider} · ${entry.model} · confidence ${entry.answer.confidence}`;
+  meta.textContent = `${entry.model} · confidence ${entry.answer.confidence}`;
   assistantBubble.append(conclusion, reasons, meta);
   row.append(createBotAvatar(), assistantBubble);
   return row;
