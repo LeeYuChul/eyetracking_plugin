@@ -46,8 +46,6 @@ let liveThinkingText = "";
 let liveAnswerText = "";
 let framesPaneWidth = 220;
 let botPaneWidth = 320;
-let contextMenuFrameId: string | null = null;
-let contextMenuOverlays = new Set<OverlayKey>();
 
 const elements = {
   analysisTab: byId<HTMLButtonElement>("analysisTab"),
@@ -81,8 +79,6 @@ const elements = {
   chatMeta: byId<HTMLSpanElement>("chatMeta"),
   heatmapToggle: byId<HTMLInputElement>("heatmapToggle"),
   scanpathToggle: byId<HTMLInputElement>("scanpathToggle"),
-  frameContextMenu: byId<HTMLDivElement>("frameContextMenu"),
-  copyFrameImageButton: byId<HTMLButtonElement>("copyFrameImageButton"),
   leftPaneResizer: byId<HTMLDivElement>("leftPaneResizer"),
   rightPaneResizer: byId<HTMLDivElement>("rightPaneResizer"),
   resizeHandle: byId<HTMLButtonElement>("resizeHandle")
@@ -109,13 +105,6 @@ function bindEvents(): void {
   elements.retryButton.addEventListener("click", requestAnalysis);
   elements.clearButton.addEventListener("click", clearCurrentSession);
   elements.askButton.addEventListener("click", askQuestion);
-  elements.copyFrameImageButton.addEventListener("click", copyContextFrameImage);
-  document.addEventListener("click", hideFrameContextMenu);
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      hideFrameContextMenu();
-    }
-  });
   elements.heatmapToggle.addEventListener("change", () => toggleOverlay("heatmap", elements.heatmapToggle.checked));
   elements.scanpathToggle.addEventListener("change", () => toggleOverlay("scanpath", elements.scanpathToggle.checked));
   document.querySelectorAll<HTMLButtonElement>("[data-scale]").forEach((button) => {
@@ -474,10 +463,6 @@ function renderFrameViewer(): void {
   }
   const shell = document.createElement("div");
   shell.className = "composite-shell";
-  shell.addEventListener("contextmenu", (event) => {
-    event.preventDefault();
-    showFrameContextMenu(event, frame);
-  });
   const original = document.createElement("img");
   original.alt = `${frame.frame_name} original`;
   original.src = artifactToDataUrl(frame.artifacts.original) || "";
@@ -498,117 +483,42 @@ function renderFrameViewer(): void {
     scanpath.className = "composite-layer overlay-layer";
     shell.append(scanpath);
   }
-  elements.frameViewer.append(shell);
+
+  const pasteButton = document.createElement("button");
+  pasteButton.className = "primary-button paste-figma-button";
+  pasteButton.type = "button";
+  pasteButton.textContent = "Paste to Figma";
+  pasteButton.addEventListener("click", pasteCurrentFrameToFigma);
+
+  elements.frameViewer.append(shell, pasteButton);
 }
 
-function showFrameContextMenu(event: MouseEvent, frame: FrameAnalysisResult): void {
-  contextMenuFrameId = frame.client_frame_id;
-  contextMenuOverlays = new Set(overlays);
-  const menu = elements.frameContextMenu;
-  menu.classList.remove("is-hidden");
-  const menuWidth = menu.offsetWidth || 150;
-  const menuHeight = menu.offsetHeight || 40;
-  const left = Math.min(event.clientX, window.innerWidth - menuWidth - 8);
-  const top = Math.min(event.clientY, window.innerHeight - menuHeight - 8);
-  menu.style.left = `${Math.max(8, left)}px`;
-  menu.style.top = `${Math.max(8, top)}px`;
-}
-
-function hideFrameContextMenu(): void {
-  elements.frameContextMenu.classList.add("is-hidden");
-}
-
-async function copyContextFrameImage(event?: MouseEvent): Promise<void> {
-  event?.stopPropagation();
-  const frame = frameById(contextMenuFrameId) || currentFrame();
-  const selectedOverlays = new Set(contextMenuOverlays);
-  hideFrameContextMenu();
+async function pasteCurrentFrameToFigma(): Promise<void> {
+  const frame = currentFrame();
   if (!frame) {
-    showError("Could not find a frame to copy.", "plugin");
+    showError("Could not find a frame to paste.", "plugin");
     return;
   }
   try {
+    const selectedOverlays = new Set(overlays);
     const blob = await renderCompositeBlob(frame, selectedOverlays);
-    if (await copyBlobToClipboard(blob)) {
-      notifyPlugin("Image copied to clipboard.");
-      return;
-    }
-    const dataUrl = await blobToDataUrl(blob);
-    if (await copyTextToClipboard(dataUrl)) {
-      notifyPlugin("Image clipboard access is limited here. Copied the image data URL instead.");
-      return;
-    }
-    downloadBlob(blob, `${frame.frame_name || "frame"}_view.png`);
-    notifyPlugin("Clipboard access is limited. Downloaded the PNG instead.", 3500);
+    const bytes = await blobToBytes(blob);
+    const original = frame.artifacts.original;
+    postToPlugin({
+      type: "PASTE_IMAGE_TO_FIGMA",
+      payload: {
+        targetNodeId: frame.figma_node_id,
+        frameName: frame.frame_name,
+        width: original?.width || frame.width,
+        height: original?.height || frame.height,
+        bytes,
+        overlays: Array.from(selectedOverlays)
+      }
+    });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not copy the image.";
+    const message = error instanceof Error ? error.message : "Could not prepare the image for Figma.";
     showError(message, "plugin");
   }
-}
-
-async function copyBlobToClipboard(blob: Blob): Promise<boolean> {
-  const ClipboardItemCtor = window.ClipboardItem;
-  if (!navigator.clipboard?.write || !ClipboardItemCtor) {
-    return false;
-  }
-  try {
-    await navigator.clipboard.write([new ClipboardItemCtor({ "image/png": blob })]);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function copyTextToClipboard(text: string): Promise<boolean> {
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch {
-      // Fall through to execCommand for Figma plugin iframe variants.
-    }
-  }
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.setAttribute("readonly", "true");
-  textarea.style.position = "fixed";
-  textarea.style.left = "-9999px";
-  textarea.style.top = "0";
-  document.body.append(textarea);
-  textarea.focus();
-  textarea.select();
-  try {
-    return document.execCommand("copy");
-  } catch {
-    return false;
-  } finally {
-    textarea.remove();
-  }
-}
-
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(new Error("Could not convert the image to a text payload."));
-    reader.readAsDataURL(blob);
-  });
-}
-
-function downloadBlob(blob: Blob, fileName: string): void {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = sanitizeFileName(fileName);
-  document.body.append(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-function sanitizeFileName(value: string): string {
-  const cleaned = value.replace(/[\\/:*?"<>|]+/g, "_").trim();
-  return cleaned || "frame_view.png";
 }
 
 async function renderCompositeBlob(frame: FrameAnalysisResult, selectedOverlays: Set<OverlayKey>): Promise<Blob> {
@@ -667,6 +577,10 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 
 function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob | null> {
   return new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+}
+
+async function blobToBytes(blob: Blob): Promise<Uint8Array> {
+  return new Uint8Array(await blob.arrayBuffer());
 }
 
 function renderMetrics(): void {
@@ -921,13 +835,6 @@ function currentFrame(): FrameAnalysisResult | null {
     return null;
   }
   return session.analysis_bundle.frames.find((frame) => frame.client_frame_id === selectedFrameId) || null;
-}
-
-function frameById(frameId: string | null): FrameAnalysisResult | null {
-  if (!session || !frameId) {
-    return null;
-  }
-  return session.analysis_bundle.frames.find((frame) => frame.client_frame_id === frameId) || null;
 }
 
 function chatHistoryForFrame(frameId: string): ChatEntry[] {

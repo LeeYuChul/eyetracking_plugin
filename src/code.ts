@@ -184,6 +184,74 @@ async function clearSession(): Promise<void> {
   postToUi({ type: "STORAGE_CLEARED" });
 }
 
+async function pasteImageToFigma(message: Extract<UiToMainMessage, { type: "PASTE_IMAGE_TO_FIGMA" }>): Promise<void> {
+  const { bytes, frameName, height, overlays, targetNodeId, width } = message.payload;
+  const imageBytes = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  if (imageBytes.byteLength === 0) {
+    throw new Error("Could not paste an empty image.");
+  }
+
+  const targetNode = targetNodeId ? await figma.getNodeByIdAsync(targetNodeId) : null;
+  const targetSceneNode = isSceneNode(targetNode) ? targetNode : null;
+  const targetPage = targetSceneNode ? pageForNode(targetSceneNode) : figma.currentPage;
+  if (targetPage && figma.currentPage.id !== targetPage.id) {
+    await figma.setCurrentPageAsync(targetPage);
+  }
+
+  const image = figma.createImage(imageBytes);
+  const rectangle = figma.createRectangle();
+  const nodeWidth = Math.max(1, Math.round(width));
+  const nodeHeight = Math.max(1, Math.round(height));
+  rectangle.name = `FrameSight - ${frameName}${overlaySuffix(overlays)}`;
+  rectangle.resize(nodeWidth, nodeHeight);
+  rectangle.fills = [
+    {
+      type: "IMAGE",
+      scaleMode: "FILL",
+      imageHash: image.hash
+    }
+  ];
+
+  const position = pastePosition(targetSceneNode, nodeWidth, nodeHeight);
+  rectangle.x = position.x;
+  rectangle.y = position.y;
+  figma.currentPage.selection = [rectangle];
+  figma.viewport.scrollAndZoomIntoView([rectangle]);
+  figma.notify("Pasted the PNG into Figma.", { timeout: 2200 });
+}
+
+function isSceneNode(node: BaseNode | null): node is SceneNode {
+  return Boolean(node && "absoluteTransform" in node && "width" in node && "height" in node);
+}
+
+function pageForNode(node: SceneNode): PageNode | null {
+  let parent: BaseNode | null = node.parent;
+  while (parent && parent.type !== "PAGE") {
+    parent = parent.parent;
+  }
+  return parent && parent.type === "PAGE" ? parent : null;
+}
+
+function pastePosition(targetNode: SceneNode | null, width: number, height: number): { x: number; y: number } {
+  if (targetNode && "absoluteTransform" in targetNode && "width" in targetNode) {
+    return {
+      x: Math.round(targetNode.absoluteTransform[0][2] + targetNode.width + 32),
+      y: Math.round(targetNode.absoluteTransform[1][2])
+    };
+  }
+  return {
+    x: Math.round(figma.viewport.center.x - width / 2),
+    y: Math.round(figma.viewport.center.y - height / 2)
+  };
+}
+
+function overlaySuffix(overlays: string[]): string {
+  if (overlays.length === 0) {
+    return " Original";
+  }
+  return ` ${overlays.map((item) => item[0].toUpperCase() + item.slice(1)).join(" + ")}`;
+}
+
 figma.ui.onmessage = (message: UiToMainMessage) => {
   if (message.type === "RUN_ANALYSIS") {
     void exportSelectedFrames(message.payload.exportScale);
@@ -220,6 +288,13 @@ figma.ui.onmessage = (message: UiToMainMessage) => {
   if (message.type === "CLEAR_CURRENT_SESSION" || message.type === "CLEAR_ALL_SESSIONS") {
     void clearSession().catch((error) => {
       postToUi({ type: "ERROR", payload: { message: String(error), source: "storage" } });
+    });
+    return;
+  }
+  if (message.type === "PASTE_IMAGE_TO_FIGMA") {
+    void pasteImageToFigma(message).catch((error) => {
+      const messageText = error instanceof Error ? error.message : String(error);
+      postToUi({ type: "ERROR", payload: { message: messageText, source: "plugin" } });
     });
     return;
   }

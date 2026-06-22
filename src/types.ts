@@ -182,6 +182,17 @@ export type UiToMainMessage =
   | { type: "SAVE_USAGE"; payload: { usage: UsageQuota } }
   | { type: "CLEAR_CURRENT_SESSION" }
   | { type: "CLEAR_ALL_SESSIONS" }
+  | {
+      type: "PASTE_IMAGE_TO_FIGMA";
+      payload: {
+        targetNodeId?: string;
+        frameName: string;
+        width: number;
+        height: number;
+        bytes: Uint8Array;
+        overlays: OverlayKey[];
+      };
+    }
   | { type: "RESIZE_PLUGIN"; payload: { width: number; height: number } }
   | { type: "NOTIFY"; payload: { message: string; timeout?: number } }
   | { type: "CLOSE_PLUGIN" };
