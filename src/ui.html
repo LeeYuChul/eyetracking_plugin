@@ -28,6 +28,7 @@
           <div>
             <h2>Analyze selected frames</h2>
             <p class="muted">Figma에서 1~15개 Frame을 선택한 뒤 Heatmap과 Scanpath를 생성합니다.</p>
+            <p class="quota-line" id="usageQuota">Analysis 50/50 left · LLM 100/100 left</p>
           </div>
           <div class="analysis-actions">
             <div class="field">
@@ -120,6 +121,10 @@
       <div class="context-menu is-hidden" id="frameContextMenu" role="menu">
         <button id="copyFrameImageButton" type="button" role="menuitem">이미지 복사</button>
       </div>
+
+      <footer class="app-footer">
+        Contact <a href="mailto:teamnewlearn@gmail.com">teamnewlearn@gmail.com</a>
+      </footer>
 
       <button class="resize-handle" id="resizeHandle" type="button" title="Resize" aria-label="Resize"></button>
     </main>

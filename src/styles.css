@@ -109,6 +109,13 @@ h3 {
   text-transform: uppercase;
 }
 
+.quota-line {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 750;
+}
+
 .app-tabs,
 .analysis-hero,
 .results-summary,
@@ -810,6 +817,23 @@ textarea {
   border-bottom: 2px solid var(--border-strong);
   background: transparent;
   cursor: nwse-resize;
+}
+
+.app-footer {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-align: right;
+}
+
+.app-footer a {
+  color: var(--accent);
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.app-footer a:hover {
+  text-decoration: underline;
 }
 
 @media (max-width: 720px) {

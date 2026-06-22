@@ -10,11 +10,14 @@ import {
   FrameAnalysisResult,
   LocalSession,
   MainToUiMessage,
+  MONTHLY_ANALYSIS_LIMIT,
+  MONTHLY_LLM_LIMIT,
   OverlayKey,
   PLUGIN_WINDOW_LIMITS,
   SelectionInfo,
   UiToMainMessage,
   UxStreamEvent,
+  UsageQuota,
   VisualArtifact
 } from "./types";
 
@@ -34,6 +37,7 @@ let apiBaseUrl = DEFAULT_API_BASE_URL;
 let isRunning = false;
 let selectionCanAnalyze = false;
 let session: LocalSession | null = null;
+let usageQuota: UsageQuota = freshUsageQuota();
 let selectedFrameId: string | null = null;
 let activePage: "analysis" | "results" = "analysis";
 let overlays = new Set<OverlayKey>();
@@ -70,6 +74,7 @@ const elements = {
   frameViewer: byId<HTMLDivElement>("frameViewer"),
   metricGrid: byId<HTMLDivElement>("metricGrid"),
   bundleMeta: byId<HTMLSpanElement>("bundleMeta"),
+  usageQuota: byId<HTMLParagraphElement>("usageQuota"),
   chatScroll: byId<HTMLDivElement>("chatScroll"),
   chatHistory: byId<HTMLDivElement>("chatHistory"),
   chatLive: byId<HTMLDivElement>("chatLive"),
@@ -87,6 +92,8 @@ function init(): void {
   bindEvents();
   postToPlugin({ type: "REFRESH_SELECTION" });
   postToPlugin({ type: "LOAD_SESSION" });
+  postToPlugin({ type: "LOAD_USAGE" });
+  renderUsageQuota();
 }
 
 function bindEvents(): void {
@@ -164,6 +171,21 @@ function handlePluginMessage(message: MainToUiMessage): void {
     renderWorkspace();
     return;
   }
+  if (message.type === "USAGE_LOADED") {
+    usageQuota = normalizeUsageQuota(message.payload.usage);
+    renderUsageQuota();
+    updateButtons();
+    if (message.payload.usage?.month !== usageQuota.month) {
+      saveUsageQuota();
+    }
+    return;
+  }
+  if (message.type === "USAGE_SAVED") {
+    usageQuota = normalizeUsageQuota(message.payload.usage);
+    renderUsageQuota();
+    updateButtons();
+    return;
+  }
   if (message.type === "ERROR") {
     showError(message.payload.message, message.payload.source || "plugin");
   }
@@ -180,6 +202,66 @@ function normalizeSession(value: LocalSession | null): LocalSession | null {
     chat_history_by_frame: value.chat_history_by_frame || {},
     last_opened_at: value.last_opened_at || new Date().toISOString()
   };
+}
+
+function currentUsageMonth(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function freshUsageQuota(): UsageQuota {
+  return {
+    month: currentUsageMonth(),
+    analysis_count: 0,
+    llm_count: 0,
+    updated_at: new Date().toISOString()
+  };
+}
+
+function normalizeUsageQuota(value: UsageQuota | null): UsageQuota {
+  const month = currentUsageMonth();
+  if (!value || value.month !== month) {
+    return freshUsageQuota();
+  }
+  return {
+    month,
+    analysis_count: clampCount(value.analysis_count, MONTHLY_ANALYSIS_LIMIT),
+    llm_count: clampCount(value.llm_count, MONTHLY_LLM_LIMIT),
+    updated_at: value.updated_at || new Date().toISOString()
+  };
+}
+
+function clampCount(value: number, limit: number): number {
+  return Math.min(limit, Math.max(0, Number.isFinite(value) ? Math.floor(value) : 0));
+}
+
+function remainingAnalysisCount(): number {
+  return Math.max(0, MONTHLY_ANALYSIS_LIMIT - usageQuota.analysis_count);
+}
+
+function remainingLlmCount(): number {
+  return Math.max(0, MONTHLY_LLM_LIMIT - usageQuota.llm_count);
+}
+
+function incrementUsage(kind: "analysis" | "llm"): void {
+  usageQuota = normalizeUsageQuota(usageQuota);
+  usageQuota = {
+    ...usageQuota,
+    analysis_count: kind === "analysis" ? clampCount(usageQuota.analysis_count + 1, MONTHLY_ANALYSIS_LIMIT) : usageQuota.analysis_count,
+    llm_count: kind === "llm" ? clampCount(usageQuota.llm_count + 1, MONTHLY_LLM_LIMIT) : usageQuota.llm_count,
+    updated_at: new Date().toISOString()
+  };
+  renderUsageQuota();
+  saveUsageQuota();
+}
+
+function saveUsageQuota(): void {
+  postToPlugin({ type: "SAVE_USAGE", payload: { usage: usageQuota } });
+}
+
+function renderUsageQuota(): void {
+  usageQuota = normalizeUsageQuota(usageQuota);
+  elements.usageQuota.textContent = `Analysis ${remainingAnalysisCount()}/${MONTHLY_ANALYSIS_LIMIT} left · LLM ${remainingLlmCount()}/${MONTHLY_LLM_LIMIT} left · resets monthly`;
 }
 
 function renderSelection(info: SelectionInfo): void {
@@ -220,6 +302,12 @@ function requestAnalysis(): void {
   if (isRunning || !selectionCanAnalyze) {
     return;
   }
+  usageQuota = normalizeUsageQuota(usageQuota);
+  if (remainingAnalysisCount() <= 0) {
+    showError("이번 달 Analysis 50회를 모두 사용했습니다. 매월 1일에 자동으로 리셋됩니다.", "plugin");
+    renderUsageQuota();
+    return;
+  }
   hideError();
   postToPlugin({ type: "RUN_ANALYSIS", payload: { exportScale } });
 }
@@ -228,6 +316,7 @@ async function runAnalysis(payload: ExportedFlowPayload): Promise<void> {
   try {
     showProgress("uploading");
     const bundle = await analyzeFrames(apiBaseUrl, payload);
+    incrementUsage("analysis");
     showProgress("saving_local");
     const nextSession = createSession(bundle);
     session = nextSession;
@@ -250,6 +339,12 @@ async function askQuestion(): Promise<void> {
   }
   const question = elements.questionInput.value.trim();
   if (!question) {
+    return;
+  }
+  usageQuota = normalizeUsageQuota(usageQuota);
+  if (remainingLlmCount() <= 0) {
+    showError("이번 달 UX Bot 사용 100회를 모두 사용했습니다. 매월 1일에 자동으로 리셋됩니다.", "plugin");
+    renderUsageQuota();
     return;
   }
 
@@ -278,6 +373,7 @@ async function askQuestion(): Promise<void> {
       model: response.model,
       created_at: new Date().toISOString()
     };
+    incrementUsage("llm");
     const nextHistory = [...history, chatEntry];
     session = {
       ...session,
@@ -872,9 +968,11 @@ function setRunning(value: boolean): void {
 }
 
 function updateButtons(): void {
-  elements.runButton.disabled = isRunning || !selectionCanAnalyze;
-  elements.retryButton.disabled = isRunning || !selectionCanAnalyze;
-  elements.askButton.disabled = isRunning || !session || !currentFrame();
+  const analysisLimited = remainingAnalysisCount() <= 0;
+  const llmLimited = remainingLlmCount() <= 0;
+  elements.runButton.disabled = isRunning || !selectionCanAnalyze || analysisLimited;
+  elements.retryButton.disabled = isRunning || !selectionCanAnalyze || analysisLimited;
+  elements.askButton.disabled = isRunning || !session || !currentFrame() || llmLimited;
   elements.clearButton.disabled = isRunning || !session;
   elements.refreshButton.disabled = isRunning;
   elements.resultsTab.disabled = !session;

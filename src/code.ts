@@ -7,6 +7,7 @@ import {
   PLUGIN_WINDOW_LIMITS,
   SelectionInfo,
   STORAGE_KEY,
+  USAGE_STORAGE_KEY,
   UiToMainMessage
 } from "./types";
 
@@ -163,9 +164,19 @@ async function loadSession(): Promise<void> {
   postToUi({ type: "STORAGE_LOADED", payload: { session: session || null } });
 }
 
+async function loadUsage(): Promise<void> {
+  const usage = await figma.clientStorage.getAsync(USAGE_STORAGE_KEY);
+  postToUi({ type: "USAGE_LOADED", payload: { usage: usage || null } });
+}
+
 async function saveSession(message: Extract<UiToMainMessage, { type: "SAVE_SESSION" }>): Promise<void> {
   await figma.clientStorage.setAsync(STORAGE_KEY, message.payload.session);
   postToUi({ type: "STORAGE_SAVED", payload: { session: message.payload.session } });
+}
+
+async function saveUsage(message: Extract<UiToMainMessage, { type: "SAVE_USAGE" }>): Promise<void> {
+  await figma.clientStorage.setAsync(USAGE_STORAGE_KEY, message.payload.usage);
+  postToUi({ type: "USAGE_SAVED", payload: { usage: message.payload.usage } });
 }
 
 async function clearSession(): Promise<void> {
@@ -188,8 +199,20 @@ figma.ui.onmessage = (message: UiToMainMessage) => {
     });
     return;
   }
+  if (message.type === "LOAD_USAGE") {
+    void loadUsage().catch((error) => {
+      postToUi({ type: "ERROR", payload: { message: String(error), source: "storage" } });
+    });
+    return;
+  }
   if (message.type === "SAVE_SESSION") {
     void saveSession(message).catch((error) => {
+      postToUi({ type: "ERROR", payload: { message: String(error), source: "storage" } });
+    });
+    return;
+  }
+  if (message.type === "SAVE_USAGE") {
+    void saveUsage(message).catch((error) => {
       postToUi({ type: "ERROR", payload: { message: String(error), source: "storage" } });
     });
     return;
@@ -216,3 +239,4 @@ figma.ui.onmessage = (message: UiToMainMessage) => {
 figma.on("selectionchange", sendSelectionInfo);
 sendSelectionInfo();
 void loadSession();
+void loadUsage();

@@ -16,6 +16,9 @@ export const PLUGIN_WINDOW_LIMITS = {
 
 export const MAX_FRAME_COUNT = 15;
 export const STORAGE_KEY = "ai_ux_flow_validation_current_session";
+export const USAGE_STORAGE_KEY = "eyetrack_mvp_monthly_usage";
+export const MONTHLY_ANALYSIS_LIMIT = 50;
+export const MONTHLY_LLM_LIMIT = 100;
 
 export type ExportScale = 1 | 2;
 export type SelectionStatus = "valid" | "warning" | "invalid";
@@ -151,6 +154,13 @@ export interface LocalSession {
   last_opened_at: string;
 }
 
+export interface UsageQuota {
+  month: string;
+  analysis_count: number;
+  llm_count: number;
+  updated_at: string;
+}
+
 export type MainToUiMessage =
   | { type: "SELECTION_INFO"; payload: SelectionInfo }
   | { type: "EXPORT_STARTED"; payload: { exportScale: ExportScale; frameCount: number } }
@@ -159,6 +169,8 @@ export type MainToUiMessage =
   | { type: "STORAGE_LOADED"; payload: { session: LocalSession | null } }
   | { type: "STORAGE_SAVED"; payload: { session: LocalSession } }
   | { type: "STORAGE_CLEARED" }
+  | { type: "USAGE_LOADED"; payload: { usage: UsageQuota | null } }
+  | { type: "USAGE_SAVED"; payload: { usage: UsageQuota } }
   | { type: "ERROR"; payload: { message: string; source?: "server" | "storage" | "plugin" } };
 
 export type UiToMainMessage =
@@ -166,6 +178,8 @@ export type UiToMainMessage =
   | { type: "REFRESH_SELECTION" }
   | { type: "LOAD_SESSION" }
   | { type: "SAVE_SESSION"; payload: { session: LocalSession } }
+  | { type: "LOAD_USAGE" }
+  | { type: "SAVE_USAGE"; payload: { usage: UsageQuota } }
   | { type: "CLEAR_CURRENT_SESSION" }
   | { type: "CLEAR_ALL_SESSIONS" }
   | { type: "RESIZE_PLUGIN"; payload: { width: number; height: number } }
