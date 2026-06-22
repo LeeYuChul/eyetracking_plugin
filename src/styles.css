@@ -119,15 +119,8 @@ h3 {
   font-weight: 750;
 }
 
-.eyebrow,
 .muted {
   color: var(--text-secondary);
-}
-
-.eyebrow {
-  font-size: 10px;
-  font-weight: 750;
-  text-transform: uppercase;
 }
 
 .header-subtitle {
