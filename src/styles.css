@@ -76,6 +76,10 @@ button:disabled {
   justify-content: space-between;
 }
 
+.app-header {
+  align-items: flex-start;
+}
+
 h1,
 h2,
 h3,
@@ -84,8 +88,10 @@ p {
 }
 
 h1 {
-  font-size: 18px;
+  max-width: 560px;
+  font-size: 17px;
   font-weight: 750;
+  line-height: 1.25;
 }
 
 h2 {
@@ -109,11 +115,11 @@ h3 {
   text-transform: uppercase;
 }
 
-.quota-line {
-  margin-top: 4px;
+.header-subtitle {
+  max-width: 620px;
+  margin-top: 3px;
   color: var(--text-secondary);
-  font-size: 11px;
-  font-weight: 750;
+  font-size: 12px;
 }
 
 .app-tabs,
@@ -171,6 +177,7 @@ h3 {
   align-items: center;
   justify-content: space-between;
   gap: 14px;
+  border-color: color-mix(in srgb, var(--accent), var(--border) 78%);
 }
 
 .analysis-actions {
@@ -304,12 +311,19 @@ textarea {
 .primary-button {
   background: var(--accent);
   color: var(--accent-text);
+  box-shadow: 0 1px 0 rgb(0 0 0 / 10%);
 }
 
 .secondary-button,
 .icon-button {
   background: var(--bg-secondary);
   color: var(--text);
+}
+
+.primary-button:not(:disabled):hover,
+.secondary-button:not(:disabled):hover,
+.icon-button:not(:disabled):hover {
+  filter: brightness(0.98);
 }
 
 .danger {
@@ -820,9 +834,48 @@ textarea {
 }
 
 .app-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   flex: 0 0 auto;
   color: var(--text-secondary);
   font-size: 11px;
+}
+
+.footer-usage {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.usage-chip,
+.usage-reset {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+
+.usage-chip strong {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  font-weight: 850;
+}
+
+.usage-reset {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+
+.footer-contact {
+  flex: 0 0 auto;
   text-align: right;
 }
 
@@ -846,6 +899,15 @@ textarea {
   .analysis-actions,
   .target-field {
     width: 100%;
+  }
+
+  .app-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .footer-contact {
+    text-align: left;
   }
 
   .workspace {

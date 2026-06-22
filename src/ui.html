@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ko">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -9,8 +9,9 @@
     <main class="app">
       <header class="app-header">
         <div>
-          <p class="eyebrow">Figma Plugin</p>
+          <p class="eyebrow">Figma Plugin · MVP</p>
           <h1>FrameSight : Eyetracking Heatmap & Scanpath</h1>
+          <p class="header-subtitle">Generate predictive attention maps, scanpaths, and frame-level UX answers.</p>
         </div>
         <div class="header-actions">
           <button class="secondary-button danger" id="clearButton" type="button">Clear Session</button>
@@ -27,8 +28,7 @@
         <section class="analysis-hero">
           <div>
             <h2>Analyze selected frames</h2>
-            <p class="muted">Figma에서 1~15개 Frame을 선택한 뒤 Heatmap과 Scanpath를 생성합니다.</p>
-            <p class="quota-line" id="usageQuota">Analysis 50/50 left · LLM 100/100 left</p>
+            <p class="muted">Select 1-15 Figma frames to generate heatmaps, scanpaths, and UX Bot evidence.</p>
           </div>
           <div class="analysis-actions">
             <div class="field">
@@ -59,7 +59,7 @@
           <span class="status-pill" id="stagePill">idle</span>
         </div>
         <div class="progress-track"><div class="progress-bar"></div></div>
-        <p class="stage-message" id="stageMessage">대기 중입니다.</p>
+        <p class="stage-message" id="stageMessage">Ready.</p>
       </section>
 
       <section class="panel error-panel is-hidden" id="errorPanel">
@@ -67,7 +67,7 @@
           <h2>Error</h2>
           <button class="secondary-button" id="retryButton" type="button">Retry</button>
         </div>
-        <p id="errorMessage">오류가 발생했습니다.</p>
+        <p id="errorMessage">Something went wrong.</p>
       </section>
 
       <section class="screen results-screen is-hidden" id="resultsPage">
@@ -111,7 +111,7 @@
               <div class="chat-history" id="chatHistory"></div>
             </div>
             <div class="chat-input-row">
-              <textarea id="questionInput" rows="3" placeholder="질문을 입력하세요"></textarea>
+              <textarea id="questionInput" rows="3" placeholder="Ask about this frame"></textarea>
               <button class="primary-button" id="askButton" type="button">Ask</button>
             </div>
           </aside>
@@ -119,11 +119,16 @@
       </section>
 
       <div class="context-menu is-hidden" id="frameContextMenu" role="menu">
-        <button id="copyFrameImageButton" type="button" role="menuitem">이미지 복사</button>
+        <button id="copyFrameImageButton" type="button" role="menuitem">Copy image</button>
       </div>
 
       <footer class="app-footer">
-        Contact <a href="mailto:teamnewlearn@gmail.com">teamnewlearn@gmail.com</a>
+        <div class="footer-usage" id="usageQuota" aria-label="Monthly usage limits">
+          <span class="usage-chip"><span>Analysis</span> <strong>50/50</strong> <span>left</span></span>
+          <span class="usage-chip"><span>LLM</span> <strong>100/100</strong> <span>left</span></span>
+          <span class="usage-reset">resets monthly</span>
+        </div>
+        <div class="footer-contact">Contact <a href="mailto:teamnewlearn@gmail.com">teamnewlearn@gmail.com</a></div>
       </footer>
 
       <button class="resize-handle" id="resizeHandle" type="button" title="Resize" aria-label="Resize"></button>

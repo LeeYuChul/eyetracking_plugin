@@ -50,7 +50,7 @@ function validateSelection(): SelectionInfo {
       status: "invalid",
       canAnalyze: false,
       frames: [],
-      message: "분석할 Frame을 선택해주세요.",
+      message: "Select at least one frame to analyze.",
       warnings: []
     };
   }
@@ -60,7 +60,7 @@ function validateSelection(): SelectionInfo {
       status: "invalid",
       canAnalyze: false,
       frames: [],
-      message: `한 번에 최대 ${MAX_FRAME_COUNT}개 Frame까지 분석할 수 있습니다.`,
+      message: `You can analyze up to ${MAX_FRAME_COUNT} frames at once.`,
       warnings: []
     };
   }
@@ -74,7 +74,7 @@ function validateSelection(): SelectionInfo {
         status: "invalid",
         canAnalyze: false,
         frames,
-        message: "선택 항목에는 Frame만 포함되어야 합니다.",
+        message: "Your selection can include frames only.",
         warnings
       };
     }
@@ -84,22 +84,22 @@ function validateSelection(): SelectionInfo {
     frames.push(info);
 
     if (!frame.visible) {
-      warnings.push(`${frame.name}: 숨겨진 Frame입니다.`);
+      warnings.push(`${frame.name}: this frame is hidden.`);
     }
     if (info.width <= 0 || info.height <= 0) {
       return {
         status: "invalid",
         canAnalyze: false,
         frames,
-        message: "Frame의 너비와 높이는 0보다 커야 합니다.",
+        message: "Frame width and height must be greater than 0.",
         warnings
       };
     }
     if (info.width < MOBILE_FRAME_LIMITS.minWidth || info.width > MOBILE_FRAME_LIMITS.maxWidth) {
-      warnings.push(`${frame.name}: 권장 모바일 너비를 벗어났습니다.`);
+      warnings.push(`${frame.name}: width is outside the recommended mobile range.`);
     }
     if (info.height < MOBILE_FRAME_LIMITS.minHeight || info.height > MOBILE_FRAME_LIMITS.maxHeight) {
-      warnings.push(`${frame.name}: 권장 모바일 높이를 벗어났습니다.`);
+      warnings.push(`${frame.name}: height is outside the recommended mobile range.`);
     }
   }
 
@@ -107,7 +107,7 @@ function validateSelection(): SelectionInfo {
     status: warnings.length > 0 ? "warning" : "valid",
     canAnalyze: frames.length > 0,
     frames,
-    message: `${frames.length}개 Frame을 분석할 수 있습니다.`,
+    message: `${frames.length} frame${frames.length === 1 ? "" : "s"} ready for analysis.`,
     warnings
   };
 }
@@ -144,7 +144,7 @@ async function exportSelectedFrames(exportScale: ExportScale): Promise<void> {
     for (const frameInfo of selection.frames) {
       const node = await figma.getNodeByIdAsync(frameInfo.id);
       if (!node || node.type !== "FRAME") {
-        throw new Error(`${frameInfo.name} Frame을 찾을 수 없습니다.`);
+        throw new Error(`Could not find the ${frameInfo.name} frame.`);
       }
       const bytes = await node.exportAsync({
         format: "PNG",
@@ -154,7 +154,7 @@ async function exportSelectedFrames(exportScale: ExportScale): Promise<void> {
     }
     postToUi({ type: "EXPORT_SUCCESS", payload: { frames: exported, exportScale } });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Frame export에 실패했습니다.";
+    const message = error instanceof Error ? error.message : "Frame export failed.";
     postToUi({ type: "EXPORT_FAILED", payload: { message } });
   }
 }

@@ -22,14 +22,14 @@ import {
 } from "./types";
 
 const STAGE_MESSAGES: Record<AppStage, string> = {
-  idle: "대기 중입니다.",
-  exporting: "Figma Frame을 PNG로 export 중입니다.",
-  uploading: "서버로 분석 요청을 전송 중입니다.",
-  analyzing: "Heatmap과 Scanpath를 생성 중입니다.",
-  saving_local: "로컬 세션을 저장 중입니다.",
-  ready: "분석 결과를 표시합니다.",
-  evaluating_ux: "프레임 질문을 평가 중입니다.",
-  error: "오류가 발생했습니다."
+  idle: "Ready.",
+  exporting: "Exporting selected frames as PNG files.",
+  uploading: "Uploading frames to the analysis server.",
+  analyzing: "Generating heatmaps and scanpaths.",
+  saving_local: "Saving the session locally.",
+  ready: "Analysis results are ready.",
+  evaluating_ux: "UX Bot is evaluating your question.",
+  error: "Something went wrong."
 };
 
 let exportScale: ExportScale = 1;
@@ -74,7 +74,7 @@ const elements = {
   frameViewer: byId<HTMLDivElement>("frameViewer"),
   metricGrid: byId<HTMLDivElement>("metricGrid"),
   bundleMeta: byId<HTMLSpanElement>("bundleMeta"),
-  usageQuota: byId<HTMLParagraphElement>("usageQuota"),
+  usageQuota: byId<HTMLElement>("usageQuota"),
   chatScroll: byId<HTMLDivElement>("chatScroll"),
   chatHistory: byId<HTMLDivElement>("chatHistory"),
   chatLive: byId<HTMLDivElement>("chatLive"),
@@ -261,7 +261,11 @@ function saveUsageQuota(): void {
 
 function renderUsageQuota(): void {
   usageQuota = normalizeUsageQuota(usageQuota);
-  elements.usageQuota.textContent = `Analysis ${remainingAnalysisCount()}/${MONTHLY_ANALYSIS_LIMIT} left · LLM ${remainingLlmCount()}/${MONTHLY_LLM_LIMIT} left · resets monthly`;
+  elements.usageQuota.innerHTML = `
+    <span class="usage-chip"><span>Analysis</span> <strong>${remainingAnalysisCount()}/${MONTHLY_ANALYSIS_LIMIT}</strong> <span>left</span></span>
+    <span class="usage-chip"><span>LLM</span> <strong>${remainingLlmCount()}/${MONTHLY_LLM_LIMIT}</strong> <span>left</span></span>
+    <span class="usage-reset">resets monthly</span>
+  `;
 }
 
 function renderSelection(info: SelectionInfo): void {
@@ -272,7 +276,7 @@ function renderSelection(info: SelectionInfo): void {
   if (info.frames.length === 0) {
     const empty = document.createElement("div");
     empty.className = "frame-row";
-    empty.textContent = "선택된 Frame 없음";
+    empty.textContent = "No frames selected";
     elements.frameList.append(empty);
   }
 
@@ -304,7 +308,7 @@ function requestAnalysis(): void {
   }
   usageQuota = normalizeUsageQuota(usageQuota);
   if (remainingAnalysisCount() <= 0) {
-    showError("이번 달 Analysis 50회를 모두 사용했습니다. 매월 1일에 자동으로 리셋됩니다.", "plugin");
+    showError("You have used all 50 analyses for this month. The limit resets on the 1st of each month.", "plugin");
     renderUsageQuota();
     return;
   }
@@ -343,7 +347,7 @@ async function askQuestion(): Promise<void> {
   }
   usageQuota = normalizeUsageQuota(usageQuota);
   if (remainingLlmCount() <= 0) {
-    showError("이번 달 UX Bot 사용 100회를 모두 사용했습니다. 매월 1일에 자동으로 리셋됩니다.", "plugin");
+    showError("You have used all 100 UX Bot messages for this month. The limit resets on the 1st of each month.", "plugin");
     renderUsageQuota();
     return;
   }
@@ -520,24 +524,24 @@ async function copyContextFrameImage(event?: MouseEvent): Promise<void> {
   const selectedOverlays = new Set(contextMenuOverlays);
   hideFrameContextMenu();
   if (!frame) {
-    showError("복사할 프레임을 찾을 수 없습니다.", "plugin");
+    showError("Could not find a frame to copy.", "plugin");
     return;
   }
   try {
     const blob = await renderCompositeBlob(frame, selectedOverlays);
     if (await copyBlobToClipboard(blob)) {
-      notifyPlugin("이미지를 클립보드에 복사했습니다.");
+      notifyPlugin("Image copied to clipboard.");
       return;
     }
     const dataUrl = await blobToDataUrl(blob);
     if (await copyTextToClipboard(dataUrl)) {
-      notifyPlugin("이 환경에서는 이미지 직접 복사가 제한되어 이미지 데이터 URL을 복사했습니다.");
+      notifyPlugin("Image clipboard access is limited here. Copied the image data URL instead.");
       return;
     }
     downloadBlob(blob, `${frame.frame_name || "frame"}_view.png`);
-    notifyPlugin("클립보드가 제한되어 PNG 파일로 내려받았습니다.", 3500);
+    notifyPlugin("Clipboard access is limited. Downloaded the PNG instead.", 3500);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "이미지를 클립보드에 복사하지 못했습니다.";
+    const message = error instanceof Error ? error.message : "Could not copy the image.";
     showError(message, "plugin");
   }
 }
@@ -586,7 +590,7 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(new Error("이미지 데이터를 텍스트로 변환하지 못했습니다."));
+    reader.onerror = () => reject(new Error("Could not convert the image to a text payload."));
     reader.readAsDataURL(blob);
   });
 }
@@ -616,7 +620,7 @@ async function renderCompositeBlob(frame: FrameAnalysisResult, selectedOverlays:
   canvas.height = Math.max(1, Math.round(height));
   const context = canvas.getContext("2d");
   if (!context) {
-    throw new Error("이미지 복사용 캔버스를 만들 수 없습니다.");
+    throw new Error("Could not create a canvas for image copy.");
   }
   await drawArtifact(context, original, canvas.width, canvas.height, 1, "source-over");
   if (selectedOverlays.has("heatmap")) {
@@ -627,7 +631,7 @@ async function renderCompositeBlob(frame: FrameAnalysisResult, selectedOverlays:
   }
   const blob = await canvasToBlob(canvas);
   if (!blob) {
-    throw new Error("이미지 복사 데이터를 생성하지 못했습니다.");
+    throw new Error("Could not generate image copy data.");
   }
   return blob;
 }
@@ -656,7 +660,7 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("복사할 이미지를 불러오지 못했습니다."));
+    image.onerror = () => reject(new Error("Could not load the image for copying."));
     image.src = src;
   });
 }
@@ -721,7 +725,7 @@ function renderChatLive(): void {
     label.textContent = event.event === "thinking" ? "Thinking" : String(event.data.stage || event.event);
     const message = document.createElement("div");
     message.className = "live-message";
-    message.textContent = typeof event.data.message === "string" ? event.data.message : "진행 중입니다.";
+    message.textContent = typeof event.data.message === "string" ? event.data.message : "Working...";
     item.append(label, message);
     elements.chatLive.append(item);
   });

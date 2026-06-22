@@ -119,7 +119,7 @@ export async function evaluateFrameStream(
   }
 
   if (!finalResponse) {
-    throw new AnalysisApiError("SSE 응답에서 최종 답변을 받지 못했습니다.", 500);
+    throw new AnalysisApiError("The stream ended before a final answer was received.", 500);
   }
   return finalResponse;
 }
@@ -145,19 +145,19 @@ export function selectedImagesForFrame(frame: FrameAnalysisResult): VisualArtifa
 export function friendlyErrorMessage(error: unknown): string {
   if (error instanceof AnalysisApiError) {
     if (error.status === 413) {
-      return "이미지 용량이 너무 큽니다. Export scale을 낮추거나 프레임 수를 줄여주세요.";
+      return "The image payload is too large. Lower the export scale or select fewer frames.";
     }
     if (error.status && error.status >= 500) {
-      return `서버 분석 중 오류가 발생했습니다. ${error.message}`;
+      return `The analysis server returned an error. ${error.message}`;
     }
     return error.message;
   }
 
   if (error instanceof TypeError) {
-    return "분석 서버에 연결할 수 없습니다.";
+    return "Could not connect to the analysis server.";
   }
 
-  return "요청을 완료하지 못했습니다.";
+  return "The request could not be completed.";
 }
 
 function withImageContext(
@@ -245,7 +245,7 @@ function finalResponseFromEvent(event: UxStreamEvent): UxEvaluationResponse {
 function extractErrorMessage(payload: unknown): string {
   const record = asRecord(payload);
   if (!record) {
-    return "서버 응답을 해석할 수 없습니다.";
+    return "Could not parse the server response.";
   }
   if (typeof record.message === "string") {
     return record.message;
