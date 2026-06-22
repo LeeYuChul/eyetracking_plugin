@@ -1,6 +1,6 @@
 {
   "name": "FrameSight : Eyetracking Heatmap & Scanpath",
-  "id": "figma-eyetrack-heatmap",
+  "id": "1650870075265749026",
   "api": "1.0.0",
   "main": "dist/code.js",
   "ui": "dist/ui.html",
