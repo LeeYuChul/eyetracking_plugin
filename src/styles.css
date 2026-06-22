@@ -80,6 +80,21 @@ button:disabled {
   align-items: flex-start;
 }
 
+.brand-lockup {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.app-logo {
+  display: block;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+}
+
 h1,
 h2,
 h3,
